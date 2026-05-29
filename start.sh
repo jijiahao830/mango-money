@@ -138,6 +138,8 @@ fi
 
 npm run build
 
+rm -rf .runtime/mango-finance-receipt
+
 kill_port_processes "$PORT"
 
 exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" node server.js

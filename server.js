@@ -85,7 +85,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v2`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v3`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -132,9 +132,10 @@ async function patchSkillChromeLookup() {
     : 'google-chrome';
 }`;
 
-  source = source.replace(/function findChrome\(\)\{[\s\S]*?\n\}/, patchedFindChrome);
-  source = source.replace(
-    /function runChrome\(args\)\{[\s\S]*?\n\}/,
+  source = replaceFunction(source, 'findChrome', patchedFindChrome);
+  source = replaceFunction(
+    source,
+    'runChrome',
     `function runChrome(args){
   const chrome = findChrome();
   const serverArgs = [
@@ -151,7 +152,36 @@ async function patchSkillChromeLookup() {
   }
 }`
   );
+
+  if (!source.includes('--no-sandbox')) {
+    throw new Error('Failed to patch Chrome runtime args');
+  }
+
   await fsp.writeFile(SKILL_SCRIPT, source, 'utf8');
+}
+
+function replaceFunction(source, functionName, replacement) {
+  const start = source.indexOf(`function ${functionName}(`);
+  if (start === -1) {
+    throw new Error(`Function not found in skill script: ${functionName}`);
+  }
+
+  const bodyStart = source.indexOf('{', start);
+  if (bodyStart === -1) {
+    throw new Error(`Function body not found in skill script: ${functionName}`);
+  }
+
+  let depth = 0;
+  for (let i = bodyStart; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth === 0) {
+      return `${source.slice(0, start)}${replacement}${source.slice(i + 1)}`;
+    }
+  }
+
+  throw new Error(`Function end not found in skill script: ${functionName}`);
 }
 
 function execNode(script, args, cwd) {
