@@ -49,7 +49,32 @@ EOF
   return 0
 }
 
+detect_cwebp_path() {
+  if [ -n "${CWEBP_PATH:-}" ] && [ -x "$CWEBP_PATH" ]; then
+    return 0
+  fi
+
+  local candidates="
+/usr/bin/cwebp
+/usr/local/bin/cwebp
+/opt/homebrew/bin/cwebp
+"
+
+  local candidate=""
+  while IFS= read -r candidate; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      export CWEBP_PATH="$candidate"
+      return 0
+    fi
+  done <<EOF
+$candidates
+EOF
+
+  return 0
+}
+
 detect_chrome_path
+detect_cwebp_path
 
 kill_port_processes() {
   local port="$1"
@@ -135,6 +160,9 @@ echo "Host: ${HOST}"
 if [ -n "${CHROME_PATH:-}" ]; then
   echo "Chrome: ${CHROME_PATH}"
 fi
+if [ -n "${CWEBP_PATH:-}" ]; then
+  echo "cwebp: ${CWEBP_PATH}"
+fi
 
 npm run build
 
@@ -142,4 +170,4 @@ rm -rf .runtime/mango-finance-receipt
 
 kill_port_processes "$PORT"
 
-exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" node server.js
+exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" CWEBP_PATH="${CWEBP_PATH:-}" node server.js

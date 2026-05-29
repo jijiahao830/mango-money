@@ -85,7 +85,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v4`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v5`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -152,9 +152,51 @@ async function patchSkillChromeLookup() {
   }
 }`
   );
+  source = replaceFunction(
+    source,
+    'convertToWebp',
+    `function convertToWebp(inputPng, outputWebp){
+  const cwebpPath = process.env.CWEBP_PATH || '/usr/bin/cwebp';
+  const converters = [
+    {
+      name: cwebpPath,
+      args: ['-quiet', '-q', '82', inputPng, '-o', outputWebp]
+    },
+    {
+      name: '/usr/local/bin/cwebp',
+      args: ['-quiet', '-q', '82', inputPng, '-o', outputWebp]
+    },
+    {
+      name: 'cwebp',
+      args: ['-quiet', '-q', '82', inputPng, '-o', outputWebp]
+    },
+    {
+      name: 'magick',
+      args: [inputPng, '-quality', '82', outputWebp]
+    },
+    {
+      name: 'ffmpeg',
+      args: ['-y', '-loglevel', 'error', '-i', inputPng, '-quality', '82', outputWebp]
+    }
+  ];
 
-  if (!source.includes('--no-sandbox')) {
-    throw new Error('Failed to patch Chrome runtime args');
+  const errors = [];
+  for (const converter of converters){
+    try{
+      execFileSync(converter.name, converter.args, { stdio: 'pipe', env: process.env });
+      return;
+    }catch(e){
+      const stderr = e?.stderr ? String(e.stderr).trim() : '';
+      errors.push(\`\${converter.name}: \${stderr || e?.message || 'failed'}\`);
+    }
+  }
+
+  die(\`WebP 转换失败。已尝试：\\n\${errors.join('\\n')}\`);
+}`
+  );
+
+  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH')) {
+    throw new Error('Failed to patch skill runtime');
   }
 
   await fsp.writeFile(SKILL_SCRIPT, source, 'utf8');
@@ -189,6 +231,7 @@ function execNode(script, args, cwd) {
     const env = {
       ...process.env,
       CHROME_PATH: process.env.CHROME_PATH || findServerChromePath() || '',
+      CWEBP_PATH: process.env.CWEBP_PATH || findServerExecutablePath('cwebp') || '',
       PATH: normalizePath(process.env.PATH)
     };
 
@@ -201,6 +244,22 @@ function execNode(script, args, cwd) {
       resolve(output);
     });
   });
+}
+
+function findServerExecutablePath(name) {
+  const candidates = {
+    cwebp: [
+      '/usr/bin/cwebp',
+      '/usr/local/bin/cwebp',
+      '/opt/homebrew/bin/cwebp'
+    ]
+  }[name] || [];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return '';
 }
 
 function normalizePath(currentPath = '') {
