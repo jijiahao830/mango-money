@@ -93,12 +93,57 @@ async function ensureSkillExtracted() {
   await fsp.rm(SKILL_ROOT, { recursive: true, force: true });
   await fsp.mkdir(RUNTIME_DIR, { recursive: true });
   execFileSync('unzip', ['-oq', SKILL_FILE, '-d', RUNTIME_DIR], { stdio: 'pipe' });
+  await patchSkillChromeLookup();
   await fsp.writeFile(marker, markerValue, 'utf8');
+}
+
+async function patchSkillChromeLookup() {
+  let source = await fsp.readFile(SKILL_SCRIPT, 'utf8');
+  const patchedFindChrome = `function findChrome(){
+  const envChrome = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (envChrome) return envChrome;
+
+  const candidates = process.platform === 'darwin'
+    ? [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Chromium.app/Contents/MacOS/Chromium'
+      ]
+    : [
+        '/snap/bin/chromium',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        'chromium',
+        'chromium-browser',
+        'google-chrome',
+        'google-chrome-stable'
+      ];
+
+  for (const candidate of candidates){
+    try{
+      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
+      return candidate;
+    }catch{}
+  }
+
+  return process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : 'google-chrome';
+}`;
+
+  source = source.replace(/function findChrome\(\)\{[\s\S]*?\n\}/, patchedFindChrome);
+  await fsp.writeFile(SKILL_SCRIPT, source, 'utf8');
 }
 
 function execNode(script, args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile(process.execPath, [script, ...args], { cwd }, (error, stdout, stderr) => {
+    const env = {
+      ...process.env,
+      CHROME_PATH: process.env.CHROME_PATH || findServerChromePath() || ''
+    };
+
+    execFile(process.execPath, [script, ...args], { cwd, env }, (error, stdout, stderr) => {
       const output = `${stdout || ''}${stderr || ''}`;
       if (error) {
         reject(new Error(output || error.message));
@@ -107,6 +152,23 @@ function execNode(script, args, cwd) {
       resolve(output);
     });
   });
+}
+
+function findServerChromePath() {
+  const candidates = [
+    '/snap/bin/chromium',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return '';
 }
 
 async function readJsonBody(req) {

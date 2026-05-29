@@ -22,6 +22,35 @@ if [ ! -d node_modules ]; then
   npm install
 fi
 
+detect_chrome_path() {
+  if [ -n "${CHROME_PATH:-}" ] && [ -x "$CHROME_PATH" ]; then
+    return 0
+  fi
+
+  local candidates="
+/snap/bin/chromium
+/usr/bin/chromium
+/usr/bin/chromium-browser
+/usr/bin/google-chrome
+/usr/bin/google-chrome-stable
+/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+"
+
+  local candidate=""
+  while IFS= read -r candidate; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+      export CHROME_PATH="$candidate"
+      return 0
+    fi
+  done <<EOF
+$candidates
+EOF
+
+  return 0
+}
+
+detect_chrome_path
+
 kill_port_processes() {
   local port="$1"
   local pids=""
@@ -103,9 +132,12 @@ is_port_in_use() {
 echo "Starting Mango Money frontend"
 echo "URL: http://localhost:${PORT}"
 echo "Host: ${HOST}"
+if [ -n "${CHROME_PATH:-}" ]; then
+  echo "Chrome: ${CHROME_PATH}"
+fi
 
 npm run build
 
 kill_port_processes "$PORT"
 
-exec env PORT="$PORT" HOST="$HOST" node server.js
+exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" node server.js
