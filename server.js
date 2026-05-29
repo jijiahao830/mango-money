@@ -66,6 +66,7 @@ server.listen(PORT, HOST, () => {
 async function renderReceipt(payload) {
   await ensureSkillExtracted();
   await fsp.mkdir(path.join(RUNTIME_DIR, 'requests'), { recursive: true });
+  await fsp.mkdir(path.join(CREATE_FILE_ROOT, '_tmp'), { recursive: true });
 
   const requestFile = path.join(RUNTIME_DIR, 'requests', `deposit-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
   await fsp.writeFile(requestFile, JSON.stringify(payload, null, 2), 'utf8');
@@ -128,7 +129,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v7`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v8`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -184,7 +185,8 @@ async function patchSkillChromeLookup() {
   const serverArgs = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage'
+    '--disable-dev-shm-usage',
+    \`--user-data-dir=\${process.env.MANGO_TMP_DIR || os.tmpdir()}/chrome-profile\`
   ];
   const finalArgs = [...serverArgs.filter(arg => !args.includes(arg)), ...args];
   try{
@@ -239,14 +241,14 @@ async function patchSkillChromeLookup() {
   );
   source = source.replace(
     "const tmpHtml = path.join(os.tmpdir(), `${baseName}_${Date.now()}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${baseName}_${Date.now()}.png`);",
-    "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpDir = path.join(outDir, '_tmp');\n  await fs.mkdir(tmpDir, { recursive: true });\n  const tmpHtml = path.join(tmpDir, `${tmpBase}.html`);\n  const tmpPng = path.join(tmpDir, `${tmpBase}.png`);"
+    "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpDir = process.env.MANGO_TMP_DIR || path.join(outDir, '_tmp');\n  await fs.mkdir(tmpDir, { recursive: true });\n  const tmpHtml = path.join(tmpDir, `${tmpBase}.html`);\n  const tmpPng = path.join(tmpDir, `${tmpBase}.png`);"
   );
   source = source.replace(
     "  convertToWebp(tmpPng, webpPath);",
     "  const pngStat = await fs.stat(tmpPng).catch(() => null);\n  if (!pngStat || !pngStat.isFile() || pngStat.size === 0) {\n    die(`Chrome 截图失败：未生成 PNG 文件：${tmpPng}`);\n  }\n\n  convertToWebp(tmpPng, webpPath);"
   );
 
-  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('mango_deposit_') || !source.includes('Chrome 截图失败')) {
+  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('MANGO_TMP_DIR') || !source.includes('Chrome 截图失败')) {
     throw new Error('Failed to patch skill runtime');
   }
 
@@ -283,6 +285,7 @@ function execNode(script, args, cwd) {
       ...process.env,
       CHROME_PATH: process.env.CHROME_PATH || findServerChromePath() || '',
       CWEBP_PATH: process.env.CWEBP_PATH || findServerExecutablePath('cwebp') || '',
+      MANGO_TMP_DIR: path.join(CREATE_FILE_ROOT, '_tmp'),
       PATH: normalizePath(process.env.PATH)
     };
 
