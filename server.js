@@ -85,7 +85,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = String(skillStat.mtimeMs);
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v2`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -133,6 +133,24 @@ async function patchSkillChromeLookup() {
 }`;
 
   source = source.replace(/function findChrome\(\)\{[\s\S]*?\n\}/, patchedFindChrome);
+  source = source.replace(
+    /function runChrome\(args\)\{[\s\S]*?\n\}/,
+    `function runChrome(args){
+  const chrome = findChrome();
+  const serverArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage'
+  ];
+  const finalArgs = [...serverArgs.filter(arg => !args.includes(arg)), ...args];
+  try{
+    execFileSync(chrome, finalArgs, { stdio: 'pipe' });
+  }catch(e){
+    const stderr = e?.stderr ? String(e.stderr) : '';
+    die(\`Chrome 渲染失败。请确认服务器已安装 Chrome/Chromium 且可被访问。当前路径：\${chrome}\\n\${stderr}\`);
+  }
+}`
+  );
   await fsp.writeFile(SKILL_SCRIPT, source, 'utf8');
 }
 
