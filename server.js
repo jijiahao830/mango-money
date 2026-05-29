@@ -43,6 +43,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname.startsWith('/api/create-file/')) {
+      await serveCreateFile(url.pathname.replace(/^\/api/, ''), res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname.startsWith('/create-file/')) {
       await serveCreateFile(url.pathname, res);
       return;
@@ -481,5 +486,5 @@ function toOutputUrl(filePath) {
 
 function toCreateFileUrl(filePath) {
   const relative = path.relative(CREATE_FILE_ROOT, filePath);
-  return `/create-file/${relative.split(path.sep).map(encodeURIComponent).join('/')}`;
+  return `/api/create-file/${relative.split(path.sep).map(encodeURIComponent).join('/')}`;
 }
