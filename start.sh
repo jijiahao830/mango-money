@@ -22,6 +22,47 @@ if [ ! -d node_modules ]; then
   npm install
 fi
 
+kill_port_processes() {
+  local port="$1"
+  local pids=""
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  fi
+
+  if [ -z "$pids" ] && command -v ss >/dev/null 2>&1; then
+    pids="$(ss -ltnp "sport = :$port" 2>/dev/null \
+      | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+      | sort -u || true)"
+  fi
+
+  if [ -z "$pids" ] && command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser "$port"/tcp 2>/dev/null || true)"
+  fi
+
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+
+  echo "Port ${port} is in use. Stopping: ${pids}"
+  kill $pids 2>/dev/null || true
+  sleep 1
+
+  local alive=""
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      alive="${alive} ${pid}"
+    fi
+  done
+
+  if [ -n "$alive" ]; then
+    echo "Force stopping:${alive}"
+    kill -9 $alive 2>/dev/null || true
+  fi
+}
+
+kill_port_processes "$PORT"
+
 echo "Starting Mango Money frontend"
 echo "URL: http://localhost:${PORT}"
 echo "Host: ${HOST}"
