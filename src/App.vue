@@ -27,7 +27,7 @@
 
           <label>
             <span>订单编号</span>
-            <input v-model="form.orderId" name="orderId" />
+            <input v-model="form.orderId" name="orderId" required />
           </label>
         </div>
 
@@ -129,7 +129,7 @@
       </div>
 
       <footer class="modal-footer">
-        <a class="download-button" :href="result.imageUrl" :download="result.webpName">下载图片</a>
+        <button class="download-button" type="button" @click="downloadImage">下载图片</button>
       </footer>
     </section>
   </div>
@@ -167,9 +167,7 @@ const progress = ref(0);
 let progressTimer = null;
 const result = reactive({
   imageUrl: '',
-  pdfUrl: '',
-  webpName: '',
-  pdfName: ''
+  webpName: ''
 });
 
 const previewImageStyle = computed(() => ({
@@ -202,7 +200,7 @@ function getPayload() {
 }
 
 async function generateReceipt() {
-  await renderWithSkill('/api/generate', '正在生成图片和 PDF...');
+  await renderWithSkill('/api/generate', '正在生成图片。。。');
 }
 
 async function renderWithSkill(url, loadingText) {
@@ -226,9 +224,7 @@ async function renderWithSkill(url, loadingText) {
     }
 
     result.imageUrl = data.imageUrl;
-    result.pdfUrl = data.pdfUrl;
     result.webpName = data.webpName;
-    result.pdfName = data.pdfName;
     finishProgress();
     statusText.value = '已生成';
     resetView();
@@ -256,6 +252,27 @@ function zoomOut() {
 
 function resetView() {
   scale.value = 1;
+}
+
+async function downloadImage() {
+  if (!result.imageUrl) return;
+
+  try {
+    const response = await fetch(result.imageUrl);
+    if (!response.ok) throw new Error('download failed');
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = result.webpName || 'deposit.webp';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    errorText.value = '下载图片失败，请重新生成后再试';
+  }
 }
 
 function startProgress() {
@@ -293,9 +310,7 @@ function clearForm() {
   dropoffAt.value = '';
   holdUntilAt.value = '';
   result.imageUrl = '';
-  result.pdfUrl = '';
   result.webpName = '';
-  result.pdfName = '';
   statusText.value = '';
   errorText.value = '';
   progress.value = 0;

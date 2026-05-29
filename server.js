@@ -75,17 +75,16 @@ async function renderReceipt(payload) {
   const webpPath = output.match(/WEBP:\s*(.+)/)?.[1]?.trim();
   const pdfPath = output.match(/PDF:\s*(.+)/)?.[1]?.trim();
 
-  if (!webpPath || !pdfPath) {
+  if (!webpPath) {
     throw new Error(`Skill rendered but output paths were not found.\n${output}`);
   }
 
   const archivedWebpPath = await archiveGeneratedWebp(webpPath);
+  if (pdfPath) await fsp.rm(pdfPath, { force: true });
 
   return {
     imageUrl: toCreateFileUrl(archivedWebpPath),
-    pdfUrl: toOutputUrl(pdfPath),
-    webpName: path.basename(archivedWebpPath),
-    pdfName: path.basename(pdfPath)
+    webpName: path.basename(archivedWebpPath)
   };
 }
 
@@ -129,7 +128,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v9`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v11`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -240,6 +239,10 @@ async function patchSkillChromeLookup() {
 }`
   );
   source = source.replace(
+    "const baseName = sanitizeFilename(`定金单_${data.customerId}_${data.customerName}_${data.carModel}_${String(data.holdUntil).slice(0,10)}`);",
+    "if (!data.orderId || String(data.orderId).trim() === '') die('orderId（订单编号）不能为空');\n  const baseName = sanitizeFilename(`${data.orderId}_${String(data.holdUntil).slice(0,10)}`);"
+  );
+  source = source.replace(
     "const tmpHtml = path.join(os.tmpdir(), `${baseName}_${Date.now()}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${baseName}_${Date.now()}.png`);",
     "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpDir = process.env.MANGO_TMP_DIR || path.join(outDir, '_tmp');\n  await fs.mkdir(tmpDir, { recursive: true });\n  const tmpHtml = path.join(tmpDir, `${tmpBase}.html`);\n  const tmpPng = path.join(tmpDir, `${tmpBase}.png`);"
   );
@@ -248,7 +251,7 @@ async function patchSkillChromeLookup() {
     "  const pngStat = await fs.stat(tmpPng).catch(() => null);\n  if (!pngStat || !pngStat.isFile() || pngStat.size === 0) {\n    die(`Chrome 截图失败：未生成 PNG 文件：${tmpPng}`);\n  }\n\n  convertToWebp(tmpPng, webpPath);"
   );
 
-  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('MANGO_TMP_DIR') || !source.includes('Chrome 截图失败')) {
+  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('MANGO_TMP_DIR') || !source.includes('Chrome 截图失败') || !source.includes('orderId（订单编号）不能为空') || source.includes('定金单_${data.customerId}')) {
     throw new Error('Failed to patch skill runtime');
   }
 
@@ -396,7 +399,7 @@ async function serveStatic(pathname, res, headOnly = false) {
 }
 
 async function serveSkillOutput(pathname, res) {
-  const relative = decodeURIComponent(pathname.replace(/^\/skill-output\/?/, ''));
+  const relative = decodePathRelative(pathname.replace(/^\/skill-output\/?/, ''));
   const filePath = path.normalize(path.join(OUTPUT_ROOT, relative));
 
   if (!filePath.startsWith(OUTPUT_ROOT)) {
@@ -408,7 +411,7 @@ async function serveSkillOutput(pathname, res) {
 }
 
 async function serveCreateFile(pathname, res) {
-  const relative = decodeURIComponent(pathname.replace(/^\/create-file\/?/, ''));
+  const relative = decodePathRelative(pathname.replace(/^\/create-file\/?/, ''));
   const filePath = path.normalize(path.join(CREATE_FILE_ROOT, relative));
 
   if (!filePath.startsWith(CREATE_FILE_ROOT)) {
@@ -428,7 +431,8 @@ async function sendFile(filePath, res, headOnly = false) {
 
   res.writeHead(200, {
     'Content-Type': MIME_TYPES[path.extname(filePath)] || 'application/octet-stream',
-    'Content-Length': stat.size
+    'Content-Length': stat.size,
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeRFC5987ValueChars(path.basename(filePath))}`
   });
 
   if (headOnly) {
@@ -437,6 +441,20 @@ async function sendFile(filePath, res, headOnly = false) {
   }
 
   fs.createReadStream(filePath).pipe(res);
+}
+
+function decodePathRelative(relativePath) {
+  return relativePath
+    .split('/')
+    .filter(Boolean)
+    .map(part => decodeURIComponent(part))
+    .join(path.sep);
+}
+
+function encodeRFC5987ValueChars(value) {
+  return encodeURIComponent(value)
+    .replace(/['()]/g, escape)
+    .replace(/\*/g, '%2A');
 }
 
 function sendJson(res, data, status = 200) {
