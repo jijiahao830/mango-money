@@ -66,7 +66,7 @@ server.listen(PORT, HOST, () => {
 async function renderReceipt(payload) {
   await ensureSkillExtracted();
   await fsp.mkdir(path.join(RUNTIME_DIR, 'requests'), { recursive: true });
-  await fsp.mkdir(path.join(CREATE_FILE_ROOT, '_tmp'), { recursive: true });
+  await fsp.mkdir(getMangoTmpDir(), { recursive: true });
 
   const requestFile = path.join(RUNTIME_DIR, 'requests', `deposit-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
   await fsp.writeFile(requestFile, JSON.stringify(payload, null, 2), 'utf8');
@@ -129,7 +129,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v8`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v9`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -285,7 +285,7 @@ function execNode(script, args, cwd) {
       ...process.env,
       CHROME_PATH: process.env.CHROME_PATH || findServerChromePath() || '',
       CWEBP_PATH: process.env.CWEBP_PATH || findServerExecutablePath('cwebp') || '',
-      MANGO_TMP_DIR: path.join(CREATE_FILE_ROOT, '_tmp'),
+      MANGO_TMP_DIR: getMangoTmpDir(),
       PATH: normalizePath(process.env.PATH)
     };
 
@@ -298,6 +298,15 @@ function execNode(script, args, cwd) {
       resolve(output);
     });
   });
+}
+
+function getMangoTmpDir() {
+  if (process.env.MANGO_TMP_DIR) return process.env.MANGO_TMP_DIR;
+  if ((process.env.CHROME_PATH || '').includes('/snap/bin/chromium')) {
+    const home = process.env.HOME || '/root';
+    return path.join(home, 'snap', 'chromium', 'common', 'mango-money-tmp');
+  }
+  return path.join(CREATE_FILE_ROOT, '_tmp');
 }
 
 function findServerExecutablePath(name) {

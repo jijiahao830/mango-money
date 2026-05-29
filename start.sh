@@ -76,6 +76,23 @@ EOF
 detect_chrome_path
 detect_cwebp_path
 
+detect_mango_tmp_dir() {
+  if [ -n "${MANGO_TMP_DIR:-}" ]; then
+    mkdir -p "$MANGO_TMP_DIR"
+    return 0
+  fi
+
+  if [ "${CHROME_PATH:-}" = "/snap/bin/chromium" ]; then
+    export MANGO_TMP_DIR="${HOME}/snap/chromium/common/mango-money-tmp"
+  else
+    export MANGO_TMP_DIR="${ROOT_DIR}/create_file/_tmp"
+  fi
+
+  mkdir -p "$MANGO_TMP_DIR"
+}
+
+detect_mango_tmp_dir
+
 kill_port_processes() {
   local port="$1"
   local pids=""
@@ -163,6 +180,7 @@ fi
 if [ -n "${CWEBP_PATH:-}" ]; then
   echo "cwebp: ${CWEBP_PATH}"
 fi
+echo "Temp: ${MANGO_TMP_DIR}"
 
 npm run build
 
@@ -170,4 +188,4 @@ rm -rf .runtime/mango-finance-receipt
 
 kill_port_processes "$PORT"
 
-exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" CWEBP_PATH="${CWEBP_PATH:-}" node server.js
+exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" CWEBP_PATH="${CWEBP_PATH:-}" MANGO_TMP_DIR="${MANGO_TMP_DIR:-}" node server.js
