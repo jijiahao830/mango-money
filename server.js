@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8764);
 const HOST = process.env.HOST || '0.0.0.0';
-const DIST_DIR = path.join(ROOT_DIR, 'dist');
+const DIST_DIR = path.join(ROOT_DIR, 'build');
 const RUNTIME_DIR = path.join(ROOT_DIR, '.runtime');
 const SKILL_FILE = path.join(ROOT_DIR, 'skills', 'mango-finance-receipt.skill');
 const SKILL_ROOT = path.join(RUNTIME_DIR, 'mango-finance-receipt');
