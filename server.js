@@ -34,7 +34,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && (url.pathname === '/api/preview' || url.pathname === '/api/generate')) {
       const payload = await readJsonBody(req);
       const result = await renderReceipt(payload);
-      sendJson(res, result);
+      await sendGeneratedWebp(res, result);
       return;
     }
 
@@ -88,9 +88,20 @@ async function renderReceipt(payload) {
   if (pdfPath) await fsp.rm(pdfPath, { force: true });
 
   return {
-    imageUrl: toCreateFileUrl(archivedWebpPath),
+    imagePath: archivedWebpPath,
     webpName: path.basename(archivedWebpPath)
   };
+}
+
+async function sendGeneratedWebp(res, result) {
+  const stat = await fsp.stat(result.imagePath);
+  res.writeHead(200, {
+    'Content-Type': 'image/webp',
+    'Content-Length': stat.size,
+    'X-Filename': encodeURIComponent(result.webpName),
+    'Content-Disposition': `inline; filename*=UTF-8''${encodeRFC5987ValueChars(result.webpName)}`
+  });
+  fs.createReadStream(result.imagePath).pipe(res);
 }
 
 async function archiveGeneratedWebp(webpPath) {

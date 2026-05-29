@@ -165,6 +165,7 @@ const errorText = ref('');
 const scale = ref(1);
 const progress = ref(0);
 let progressTimer = null;
+let previewObjectUrl = '';
 const result = reactive({
   imageUrl: '',
   webpName: ''
@@ -217,14 +218,16 @@ async function renderWithSkill(url, loadingText) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(getPayload())
     });
-    const data = await response.json();
-
     if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
       throw new Error(data.error || '生成失败');
     }
 
-    result.imageUrl = data.imageUrl;
-    result.webpName = data.webpName;
+    const blob = await response.blob();
+    revokePreviewObjectUrl();
+    previewObjectUrl = URL.createObjectURL(blob);
+    result.imageUrl = previewObjectUrl;
+    result.webpName = getFilenameFromResponse(response) || 'deposit.webp';
     finishProgress();
     statusText.value = '已生成';
     resetView();
@@ -258,20 +261,26 @@ async function downloadImage() {
   if (!result.imageUrl) return;
 
   try {
-    const response = await fetch(result.imageUrl);
-    if (!response.ok) throw new Error('download failed');
-
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.href = url;
+    link.href = result.imageUrl;
     link.download = result.webpName || 'deposit.webp';
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
   } catch {
     errorText.value = '下载图片失败，请重新生成后再试';
+  }
+}
+
+function getFilenameFromResponse(response) {
+  const raw = response.headers.get('X-Filename');
+  return raw ? decodeURIComponent(raw) : '';
+}
+
+function revokePreviewObjectUrl() {
+  if (previewObjectUrl) {
+    URL.revokeObjectURL(previewObjectUrl);
+    previewObjectUrl = '';
   }
 }
 
@@ -309,6 +318,7 @@ function clearForm() {
   pickupAt.value = '';
   dropoffAt.value = '';
   holdUntilAt.value = '';
+  revokePreviewObjectUrl();
   result.imageUrl = '';
   result.webpName = '';
   statusText.value = '';
