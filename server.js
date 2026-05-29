@@ -14,6 +14,7 @@ const SKILL_FILE = path.join(ROOT_DIR, 'skills', 'mango-finance-receipt.skill');
 const SKILL_ROOT = path.join(RUNTIME_DIR, 'mango-finance-receipt');
 const SKILL_SCRIPT = path.join(SKILL_ROOT, 'scripts', 'render_deposit.mjs');
 const OUTPUT_ROOT = path.join(SKILL_ROOT, 'output');
+const CREATE_FILE_ROOT = path.join(ROOT_DIR, 'create_file');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -39,6 +40,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname.startsWith('/skill-output/')) {
       await serveSkillOutput(url.pathname, res);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/create-file/')) {
+      await serveCreateFile(url.pathname, res);
       return;
     }
 
@@ -72,12 +78,49 @@ async function renderReceipt(payload) {
     throw new Error(`Skill rendered but output paths were not found.\n${output}`);
   }
 
+  const archivedWebpPath = await archiveGeneratedWebp(webpPath);
+
   return {
-    imageUrl: toOutputUrl(webpPath),
+    imageUrl: toCreateFileUrl(archivedWebpPath),
     pdfUrl: toOutputUrl(pdfPath),
-    webpName: path.basename(webpPath),
+    webpName: path.basename(archivedWebpPath),
     pdfName: path.basename(pdfPath)
   };
+}
+
+async function archiveGeneratedWebp(webpPath) {
+  const day = formatLocalDate(new Date());
+  const dayDir = path.join(CREATE_FILE_ROOT, day);
+  await fsp.mkdir(dayDir, { recursive: true });
+
+  const targetPath = await getAvailableFilePath(dayDir, path.basename(webpPath));
+  await fsp.copyFile(webpPath, targetPath);
+  return targetPath;
+}
+
+async function getAvailableFilePath(dir, fileName) {
+  const ext = path.extname(fileName);
+  const base = path.basename(fileName, ext);
+  let candidate = path.join(dir, fileName);
+  let index = 1;
+
+  while (await fileExists(candidate)) {
+    candidate = path.join(dir, `${base}_${index}${ext}`);
+    index += 1;
+  }
+
+  return candidate;
+}
+
+async function fileExists(filePath) {
+  return Boolean(await fsp.stat(filePath).catch(() => null));
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 async function ensureSkillExtracted() {
@@ -85,7 +128,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v5`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v6`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -194,8 +237,12 @@ async function patchSkillChromeLookup() {
   die(\`WebP 转换失败。已尝试：\\n\${errors.join('\\n')}\`);
 }`
   );
+  source = source.replace(
+    "const tmpHtml = path.join(os.tmpdir(), `${baseName}_${Date.now()}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${baseName}_${Date.now()}.png`);",
+    "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpHtml = path.join(os.tmpdir(), `${tmpBase}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${tmpBase}.png`);"
+  );
 
-  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH')) {
+  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('mango_deposit_')) {
     throw new Error('Failed to patch skill runtime');
   }
 
@@ -344,6 +391,18 @@ async function serveSkillOutput(pathname, res) {
   await sendFile(filePath, res);
 }
 
+async function serveCreateFile(pathname, res) {
+  const relative = decodeURIComponent(pathname.replace(/^\/create-file\/?/, ''));
+  const filePath = path.normalize(path.join(CREATE_FILE_ROOT, relative));
+
+  if (!filePath.startsWith(CREATE_FILE_ROOT)) {
+    sendText(res, 'Forbidden', 403);
+    return;
+  }
+
+  await sendFile(filePath, res);
+}
+
 async function sendFile(filePath, res, headOnly = false) {
   const stat = await fsp.stat(filePath).catch(() => null);
   if (!stat || !stat.isFile()) {
@@ -384,4 +443,9 @@ function sendText(res, text, status = 200) {
 function toOutputUrl(filePath) {
   const relative = path.relative(OUTPUT_ROOT, filePath);
   return `/skill-output/${relative.split(path.sep).map(encodeURIComponent).join('/')}`;
+}
+
+function toCreateFileUrl(filePath) {
+  const relative = path.relative(CREATE_FILE_ROOT, filePath);
+  return `/create-file/${relative.split(path.sep).map(encodeURIComponent).join('/')}`;
 }
