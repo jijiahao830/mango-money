@@ -128,7 +128,7 @@ async function ensureSkillExtracted() {
   if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
 
   const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v6`;
+  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v7`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
@@ -239,10 +239,14 @@ async function patchSkillChromeLookup() {
   );
   source = source.replace(
     "const tmpHtml = path.join(os.tmpdir(), `${baseName}_${Date.now()}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${baseName}_${Date.now()}.png`);",
-    "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpHtml = path.join(os.tmpdir(), `${tmpBase}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${tmpBase}.png`);"
+    "const tmpBase = `mango_deposit_${Date.now()}_${Math.random().toString(16).slice(2)}`;\n  const tmpDir = path.join(outDir, '_tmp');\n  await fs.mkdir(tmpDir, { recursive: true });\n  const tmpHtml = path.join(tmpDir, `${tmpBase}.html`);\n  const tmpPng = path.join(tmpDir, `${tmpBase}.png`);"
+  );
+  source = source.replace(
+    "  convertToWebp(tmpPng, webpPath);",
+    "  const pngStat = await fs.stat(tmpPng).catch(() => null);\n  if (!pngStat || !pngStat.isFile() || pngStat.size === 0) {\n    die(`Chrome 截图失败：未生成 PNG 文件：${tmpPng}`);\n  }\n\n  convertToWebp(tmpPng, webpPath);"
   );
 
-  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('mango_deposit_')) {
+  if (!source.includes('--no-sandbox') || !source.includes('CWEBP_PATH') || !source.includes('mango_deposit_') || !source.includes('Chrome 截图失败')) {
     throw new Error('Failed to patch skill runtime');
   }
 
