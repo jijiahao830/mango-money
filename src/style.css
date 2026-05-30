@@ -248,7 +248,8 @@ label span {
   min-width: 240px;
 }
 
-input {
+input,
+select {
   width: 100%;
   padding: 11px 12px;
   border: 1px solid #d1d5db;
@@ -258,7 +259,8 @@ input {
   background: #ffffff;
 }
 
-input:focus {
+input:focus,
+select:focus {
   border-color: #111827;
   box-shadow: 0 0 0 3px var(--ring);
 }

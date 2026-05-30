@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -11,10 +12,21 @@ const PORT = Number(process.env.PORT || 8764);
 const HOST = process.env.HOST || '0.0.0.0';
 const DIST_DIR = path.join(ROOT_DIR, 'build');
 const RUNTIME_DIR = path.join(ROOT_DIR, '.runtime');
-const SKILL_FILE = path.join(ROOT_DIR, 'skills', 'mango-finance-receipt.skill');
-const SKILL_ROOT = path.join(RUNTIME_DIR, 'mango-finance-receipt');
-const SKILL_SCRIPT = path.join(SKILL_ROOT, 'scripts', 'render_deposit.mjs');
-const OUTPUT_ROOT = path.join(SKILL_ROOT, 'output');
+const SKILLS = {
+  deposit: {
+    file: path.join(ROOT_DIR, 'skills', 'mango-finance-deposit-receipt.skill'),
+    root: path.join(RUNTIME_DIR, 'mango-finance-deposit-receipt'),
+    scriptName: 'render_deposit.mjs',
+    patchRuntime: true
+  },
+  balance: {
+    file: path.join(ROOT_DIR, 'skills', 'mango-finance-balance-receipt.skill'),
+    root: path.join(RUNTIME_DIR, 'mango-finance-balance-receipt'),
+    scriptName: 'render_balance.mjs',
+    patchRuntime: false
+  }
+};
+const OUTPUT_ROOT = RUNTIME_DIR;
 const CREATE_FILE_ROOT = path.join(ROOT_DIR, 'create_file');
 
 const MIME_TYPES = {
@@ -34,7 +46,14 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && (url.pathname === '/api/preview' || url.pathname === '/api/generate')) {
       const payload = await readJsonBody(req);
-      const result = await renderReceipt(payload);
+      const result = await renderReceipt(payload, 'deposit');
+      await sendGeneratedWebp(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/generate-balance') {
+      const payload = await readJsonBody(req);
+      const result = await renderReceipt(payload, 'balance');
       await sendGeneratedWebp(res, result);
       return;
     }
@@ -49,6 +68,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/djd-record') {
       const payload = await readJsonBody(req);
       const result = await saveDjdRecord(payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/wkd-record') {
+      const payload = await readJsonBody(req);
+      const result = await saveWkdRecord(payload);
       sendJson(res, result);
       return;
     }
@@ -83,15 +109,16 @@ server.listen(PORT, HOST, () => {
   console.log(`Mango Money is running at http://localhost:${PORT}`);
 });
 
-async function renderReceipt(payload) {
-  await ensureSkillExtracted();
+async function renderReceipt(payload, type = 'deposit') {
+  const skill = getSkillConfig(type);
+  await ensureSkillExtracted(type);
   await fsp.mkdir(path.join(RUNTIME_DIR, 'requests'), { recursive: true });
   await fsp.mkdir(getMangoTmpDir(), { recursive: true });
 
-  const requestFile = path.join(RUNTIME_DIR, 'requests', `deposit-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
+  const requestFile = path.join(RUNTIME_DIR, 'requests', `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
   await fsp.writeFile(requestFile, JSON.stringify(payload, null, 2), 'utf8');
 
-  const output = await execNode(SKILL_SCRIPT, [requestFile], SKILL_ROOT);
+  const output = await execNode(skill.script, [requestFile], skill.root);
   const webpPath = output.match(/WEBP:\s*(.+)/)?.[1]?.trim();
   const pdfPath = output.match(/PDF:\s*(.+)/)?.[1]?.trim();
 
@@ -145,6 +172,59 @@ async function saveDjdRecord(payload) {
         payload.depositAmount,
         payload.balanceAmount,
         normalizeMysqlDateTime(payload.holdUntil)
+      ]
+    );
+    return { ok: true, id: result.insertId };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function saveWkdRecord(payload) {
+  validateWkdPayload(payload);
+
+  const mysqlConfig = await readMysqlConfig();
+  const conn = await mysql.createConnection({
+    host: mysqlConfig.host,
+    port: mysqlConfig.port || 3306,
+    user: mysqlConfig.user,
+    password: mysqlConfig.password,
+    database: mysqlConfig.database
+  });
+
+  try {
+    const [result] = await conn.execute(
+      `INSERT INTO cw_wkd (
+        create_user,
+        customer_name,
+        customer_id,
+        car_model,
+        order_id,
+        rental_time,
+        pickup_dropoff_method,
+        balance_amount,
+        unit_price,
+        payment_method,
+        order_remark_line1,
+        order_remark_line2,
+        received_at,
+        operator
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        payload.createUser,
+        payload.customerName,
+        payload.customerId,
+        payload.carModel,
+        payload.orderId,
+        payload.rentalTime,
+        payload.pickupDropoffMethod,
+        payload.balanceAmount,
+        payload.unitPrice,
+        payload.paymentMethod,
+        payload.orderRemarkLine1 || '',
+        payload.orderRemarkLine2 || '',
+        payload.receivedAt,
+        payload.operator
       ]
     );
     return { ok: true, id: result.insertId };
@@ -218,6 +298,28 @@ function validateDjdPayload(payload) {
   }
 }
 
+function validateWkdPayload(payload) {
+  const required = [
+    'customerName',
+    'customerId',
+    'carModel',
+    'orderId',
+    'rentalTime',
+    'pickupDropoffMethod',
+    'balanceAmount',
+    'unitPrice',
+    'paymentMethod',
+    'receivedAt',
+    'operator',
+    'createUser'
+  ];
+
+  const missing = required.filter(key => payload[key] === undefined || String(payload[key]).trim() === '');
+  if (missing.length) {
+    throw new Error(`缺少字段：${missing.join(', ')}`);
+  }
+}
+
 function normalizeMysqlDateTime(value) {
   return String(value).replace(/\./g, '-');
 }
@@ -268,25 +370,36 @@ function formatLocalDate(date) {
   return `${year}-${month}-${day}`;
 }
 
-async function ensureSkillExtracted() {
-  const skillStat = await fsp.stat(SKILL_FILE).catch(() => null);
-  if (!skillStat) throw new Error('Skill file not found: skills/mango-finance-receipt.skill');
+function getSkillConfig(type) {
+  const skill = SKILLS[type];
+  if (!skill) throw new Error(`未知单据类型：${type}`);
+  return {
+    ...skill,
+    script: path.join(skill.root, 'scripts', skill.scriptName)
+  };
+}
 
-  const marker = path.join(SKILL_ROOT, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:chrome-runtime-patch-v11`;
+async function ensureSkillExtracted(type) {
+  const skill = getSkillConfig(type);
+  const skillStat = await fsp.stat(skill.file).catch(() => null);
+  if (!skillStat) throw new Error(`Skill file not found: ${path.relative(ROOT_DIR, skill.file)}`);
+
+  const marker = path.join(skill.root, '.source-mtime');
+  const markerValue = `${skillStat.mtimeMs}:${skill.patchRuntime ? 'chrome-runtime-patch-v13' : 'runtime-v1'}`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
-  if (currentMarker === markerValue && fs.existsSync(SKILL_SCRIPT)) return;
+  if (currentMarker === markerValue && fs.existsSync(skill.script)) return;
 
-  await fsp.rm(SKILL_ROOT, { recursive: true, force: true });
+  await fsp.rm(skill.root, { recursive: true, force: true });
   await fsp.mkdir(RUNTIME_DIR, { recursive: true });
-  execFileSync('unzip', ['-oq', SKILL_FILE, '-d', RUNTIME_DIR], { stdio: 'pipe' });
-  await patchSkillChromeLookup();
+  execFileSync('unzip', ['-oq', skill.file, '-d', RUNTIME_DIR], { stdio: 'pipe' });
+  if (skill.patchRuntime) await patchSkillChromeLookup(skill);
   await fsp.writeFile(marker, markerValue, 'utf8');
 }
 
-async function patchSkillChromeLookup() {
-  let source = await fsp.readFile(SKILL_SCRIPT, 'utf8');
+async function patchSkillChromeLookup(skill) {
+  const scriptPath = path.join(skill.root, 'scripts', skill.scriptName);
+  let source = await fsp.readFile(scriptPath, 'utf8');
   const patchedFindChrome = `function findChrome(){
   const envChrome = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
   if (envChrome) return envChrome;
@@ -330,7 +443,7 @@ async function patchSkillChromeLookup() {
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
-    \`--user-data-dir=\${process.env.MANGO_TMP_DIR || os.tmpdir()}/chrome-profile\`
+    ...(process.platform === 'darwin' ? [] : [\`--user-data-dir=\${process.env.MANGO_TMP_DIR || os.tmpdir()}/chrome-profile\`])
   ];
   const finalArgs = [...serverArgs.filter(arg => !args.includes(arg)), ...args];
   try{
@@ -400,7 +513,7 @@ async function patchSkillChromeLookup() {
     throw new Error('Failed to patch skill runtime');
   }
 
-  await fsp.writeFile(SKILL_SCRIPT, source, 'utf8');
+  await fsp.writeFile(scriptPath, source, 'utf8');
 }
 
 function replaceFunction(source, functionName, replacement) {
@@ -450,6 +563,9 @@ function execNode(script, args, cwd) {
 
 function getMangoTmpDir() {
   if (process.env.MANGO_TMP_DIR) return process.env.MANGO_TMP_DIR;
+  if (process.platform === 'darwin') {
+    return path.join(os.tmpdir(), 'mango-money-tmp');
+  }
   if ((process.env.CHROME_PATH || '').includes('/snap/bin/chromium')) {
     const home = process.env.HOME || '/root';
     return path.join(home, 'snap', 'chromium', 'common', 'mango-money-tmp');
