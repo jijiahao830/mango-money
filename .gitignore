@@ -3,4 +3,5 @@ dist
 build
 .runtime
 create_file/
+app_config.json
 .DS_Store

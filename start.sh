@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${PORT:-8764}"
+PORT="8764"
 HOST="${HOST:-0.0.0.0}"
 
 cd "$ROOT_DIR"
@@ -21,6 +21,13 @@ if [ ! -d node_modules ]; then
   echo "Installing dependencies..."
   npm install
 fi
+
+if [ ! -f app_config.json ]; then
+  echo "app_config.json is required. Please create it before starting the service." >&2
+  exit 1
+fi
+
+mkdir -p create_file
 
 detect_chrome_path() {
   if [ -n "${CHROME_PATH:-}" ] && [ -x "$CHROME_PATH" ]; then
@@ -171,7 +178,7 @@ is_port_in_use() {
   return 1
 }
 
-echo "Starting Mango Money frontend"
+echo "Starting Mango Money frontend and backend"
 echo "URL: http://localhost:${PORT}"
 echo "Host: ${HOST}"
 if [ -n "${CHROME_PATH:-}" ]; then
@@ -187,5 +194,8 @@ npm run build
 rm -rf .runtime/mango-finance-receipt
 
 kill_port_processes "$PORT"
+
+echo "Frontend build directory: ${ROOT_DIR}/build"
+echo "Backend API: http://127.0.0.1:${PORT}/api"
 
 exec env PORT="$PORT" HOST="$HOST" CHROME_PATH="${CHROME_PATH:-}" CWEBP_PATH="${CWEBP_PATH:-}" MANGO_TMP_DIR="${MANGO_TMP_DIR:-}" node server.js

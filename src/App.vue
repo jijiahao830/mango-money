@@ -1,12 +1,85 @@
 <template>
   <div class="site-background" aria-hidden="true"></div>
   <main class="container app-shell">
-    <section class="card form-card">
+    <section v-if="!currentUser" class="card login-card">
       <header class="page-header">
         <img class="top-logo" :src="topLogo" alt="芒果租车" />
-        <h1>芒果租车 · 定金单生成</h1>
+        <h1>芒果租车 财务系统登录</h1>
       </header>
-      <form ref="receiptForm" class="receipt-form">
+
+      <form class="receipt-form" @submit.prevent="login">
+        <div class="row">
+          <label>
+            <span>账号</span>
+            <input v-model="loginForm.username" autocomplete="username" required />
+          </label>
+
+          <label>
+            <span>密码</span>
+            <input
+              v-model="loginForm.password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+          </label>
+        </div>
+
+        <hr />
+
+        <button type="submit" :disabled="isLoginLoading">登录</button>
+      </form>
+
+      <p v-if="loginError" class="error-text">{{ loginError }}</p>
+    </section>
+
+    <section v-else class="workspace">
+      <header class="workspace-header">
+        <img class="top-logo" :src="topLogo" alt="芒果租车" />
+      </header>
+
+      <nav class="workspace-nav" aria-label="财务系统导航">
+        <div class="nav-actions">
+          <button
+            class="nav-button"
+            :class="{ active: activePage === 'home' }"
+            type="button"
+            @click="activePage = 'home'"
+          >
+            首页
+          </button>
+          <button
+            class="nav-button"
+            :class="{ active: activePage === 'deposit' }"
+            type="button"
+            @click="activePage = 'deposit'"
+          >
+            定金单
+          </button>
+          <button
+            class="nav-button"
+            :class="{ active: activePage === 'balance' }"
+            type="button"
+            @click="activePage = 'balance'"
+          >
+            尾款单
+          </button>
+        </div>
+
+        <div class="nav-user">
+          <span>当前登录：<strong>{{ currentUser.username }}</strong></span>
+          <button class="secondary nav-logout" type="button" :disabled="isLoading" @click="logout">退出登录</button>
+        </div>
+      </nav>
+
+      <section v-if="activePage === 'home'" class="workspace-page"></section>
+
+      <section v-else-if="activePage === 'deposit'" class="card form-card">
+        <header class="page-header compact">
+          <h1>定金单生成</h1>
+        </header>
+
+        <form ref="receiptForm" class="receipt-form">
         <div class="row">
           <label>
             <span>客户名</span>
@@ -90,18 +163,21 @@
           <button type="button" :disabled="isLoading" @click="generateReceipt">生成</button>
           <button class="secondary" type="button" :disabled="isLoading" @click="clearForm">清空</button>
         </div>
-      </form>
+        </form>
 
-      <div v-if="isLoading" class="progress-wrap" aria-label="正在生成">
-        <div class="progress-track">
-          <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
-          <img class="progress-logo" :src="orangeLogo" alt="" :style="progressLogoStyle" />
-          <span class="progress-percent">{{ progress }}%</span>
+        <div v-if="isLoading" class="progress-wrap" aria-label="正在生成">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
+            <img class="progress-logo" :src="orangeLogo" alt="" :style="progressLogoStyle" />
+            <span class="progress-percent">{{ progress }}%</span>
+          </div>
         </div>
-      </div>
 
-      <p v-if="statusText" class="status-text">{{ statusText }}</p>
-      <p v-if="errorText" class="error-text">{{ errorText }}</p>
+        <p v-if="statusText" class="status-text">{{ statusText }}</p>
+        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+      </section>
+
+      <section v-else class="workspace-page"></section>
     </section>
   </main>
 
@@ -153,7 +229,16 @@ const form = reactive({
 });
 
 const DEFAULT_PICKUP_DROPOFF_METHOD = '昆明 · 到店取车';
+const STORED_USER_KEY = 'mango_finance_user';
 
+const currentUser = ref(readStoredUser());
+const activePage = ref('home');
+const isLoginLoading = ref(false);
+const loginError = ref('');
+const loginForm = reactive({
+  username: '',
+  password: ''
+});
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -168,7 +253,8 @@ let progressTimer = null;
 let previewObjectUrl = '';
 const result = reactive({
   imageUrl: '',
-  webpName: ''
+  webpName: '',
+  recordSaved: false
 });
 
 const previewImageStyle = computed(() => ({
@@ -198,6 +284,46 @@ function getPayload() {
     pickupDropoffMethod:
       form.pickupDropoffMethod.trim() || DEFAULT_PICKUP_DROPOFF_METHOD
   };
+}
+
+async function login() {
+  loginError.value = '';
+  isLoginLoading.value = true;
+
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(loginForm)
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || '登录失败');
+    }
+
+    currentUser.value = data.user;
+    localStorage.setItem(STORED_USER_KEY, JSON.stringify(data.user));
+    loginForm.password = '';
+  } catch (error) {
+    loginError.value = error?.message || String(error);
+  } finally {
+    isLoginLoading.value = false;
+  }
+}
+
+function logout() {
+  localStorage.removeItem(STORED_USER_KEY);
+  currentUser.value = null;
+  clearForm();
+}
+
+function readStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem(STORED_USER_KEY) || 'null');
+  } catch {
+    return null;
+  }
 }
 
 async function generateReceipt() {
@@ -259,6 +385,7 @@ async function renderWithSkill(url, loadingText) {
     previewObjectUrl = URL.createObjectURL(blob);
     result.imageUrl = previewObjectUrl;
     result.webpName = getFilenameFromResponse(response) || 'deposit.webp';
+    result.recordSaved = false;
     finishProgress();
     statusText.value = '已生成';
     resetView();
@@ -292,6 +419,11 @@ async function downloadImage() {
   if (!result.imageUrl) return;
 
   try {
+    if (!result.recordSaved) {
+      await saveDjdRecord();
+      result.recordSaved = true;
+    }
+
     const link = document.createElement('a');
     link.href = result.imageUrl;
     link.download = result.webpName || 'deposit.webp';
@@ -300,6 +432,22 @@ async function downloadImage() {
     link.remove();
   } catch {
     errorText.value = '下载图片失败，请重新生成后再试';
+  }
+}
+
+async function saveDjdRecord() {
+  const response = await fetch('/api/djd-record', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...getPayload(),
+      createUser: currentUser.value?.username || ''
+    })
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || '记录定金单失败');
   }
 }
 
@@ -352,6 +500,7 @@ function clearForm() {
   revokePreviewObjectUrl();
   result.imageUrl = '';
   result.webpName = '';
+  result.recordSaved = false;
   statusText.value = '';
   errorText.value = '';
   progress.value = 0;

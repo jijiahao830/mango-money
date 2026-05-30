@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import mysql from 'mysql2/promise';
 
 const ROOT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8764);
@@ -38,6 +39,20 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/login') {
+      const payload = await readJsonBody(req);
+      const result = await loginUser(payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/djd-record') {
+      const payload = await readJsonBody(req);
+      const result = await saveDjdRecord(payload);
+      sendJson(res, result);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname.startsWith('/skill-output/')) {
       await serveSkillOutput(url.pathname, res);
       return;
@@ -60,7 +75,7 @@ const server = http.createServer(async (req, res) => {
 
     sendJson(res, { error: 'Method not allowed' }, 405);
   } catch (error) {
-    sendJson(res, { error: error?.message || String(error) }, 500);
+    sendJson(res, { error: error?.message || String(error) }, error?.statusCode || 500);
   }
 });
 
@@ -91,6 +106,120 @@ async function renderReceipt(payload) {
     imagePath: archivedWebpPath,
     webpName: path.basename(archivedWebpPath)
   };
+}
+
+async function saveDjdRecord(payload) {
+  validateDjdPayload(payload);
+
+  const mysqlConfig = await readMysqlConfig();
+  const conn = await mysql.createConnection({
+    host: mysqlConfig.host,
+    port: mysqlConfig.port || 3306,
+    user: mysqlConfig.user,
+    password: mysqlConfig.password,
+    database: mysqlConfig.database
+  });
+
+  try {
+    const [result] = await conn.execute(
+      `INSERT INTO cw_djd (
+        create_user,
+        customer_name,
+        customer_id,
+        car_model,
+        order_id,
+        rental_time,
+        pickup_dropoff_method,
+        deposit_amount,
+        balance_amount,
+        hold_until
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        payload.createUser,
+        payload.customerName,
+        payload.customerId,
+        payload.carModel,
+        payload.orderId,
+        payload.rentalTime,
+        payload.pickupDropoffMethod,
+        payload.depositAmount,
+        payload.balanceAmount,
+        normalizeMysqlDateTime(payload.holdUntil)
+      ]
+    );
+    return { ok: true, id: result.insertId };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function loginUser(payload) {
+  const username = String(payload.username || '').trim();
+  const password = String(payload.password || '');
+
+  if (!username || !password) {
+    throw new Error('请输入账号和密码');
+  }
+
+  const mysqlConfig = await readMysqlConfig();
+  const conn = await mysql.createConnection({
+    host: mysqlConfig.host,
+    port: mysqlConfig.port || 3306,
+    user: mysqlConfig.user,
+    password: mysqlConfig.password,
+    database: mysqlConfig.database
+  });
+
+  try {
+    const [rows] = await conn.execute(
+      'SELECT id, username FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
+      [username, password]
+    );
+
+    if (!rows.length) {
+      const error = new Error('账号或密码错误，或账号未启用');
+      error.statusCode = 401;
+      throw error;
+    }
+
+    return {
+      ok: true,
+      user: rows[0]
+    };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function readMysqlConfig() {
+  const configPath = path.join(ROOT_DIR, 'app_config.json');
+  const raw = await fsp.readFile(configPath, 'utf8');
+  const config = JSON.parse(raw);
+  return config.mysql || {};
+}
+
+function validateDjdPayload(payload) {
+  const required = [
+    'customerName',
+    'customerId',
+    'carModel',
+    'orderId',
+    'rentalTime',
+    'pickupDropoffMethod',
+    'depositAmount',
+    'balanceAmount',
+    'holdUntil',
+    'createUser'
+  ];
+
+  const missing = required.filter(key => payload[key] === undefined || String(payload[key]).trim() === '');
+  if (missing.length) {
+    throw new Error(`缺少字段：${missing.join(', ')}`);
+  }
+}
+
+function normalizeMysqlDateTime(value) {
+  return String(value).replace(/\./g, '-');
 }
 
 async function sendGeneratedWebp(res, result) {
