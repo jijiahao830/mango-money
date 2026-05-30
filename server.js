@@ -65,6 +65,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/users') {
+      const result = await listUsers();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/users') {
+      const payload = await readJsonBody(req);
+      const result = await createUser(payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'PATCH' && /^\/api\/users\/\d+\/password$/.test(url.pathname)) {
+      const id = Number(url.pathname.match(/^\/api\/users\/(\d+)\/password$/)?.[1]);
+      const payload = await readJsonBody(req);
+      const result = await updateUserPassword(id, payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'DELETE' && /^\/api\/users\/\d+$/.test(url.pathname)) {
+      const id = Number(url.pathname.match(/^\/api\/users\/(\d+)$/)?.[1]);
+      const result = await deleteUser(id);
+      sendJson(res, result);
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/djd-record') {
       const payload = await readJsonBody(req);
       const result = await saveDjdRecord(payload);
@@ -251,8 +279,9 @@ async function loginUser(payload) {
   });
 
   try {
+    await ensureUserOptionalColumns(conn);
     const [rows] = await conn.execute(
-      'SELECT id, username FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
+      'SELECT id, username, permission FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
       [username, password]
     );
 
@@ -268,6 +297,131 @@ async function loginUser(payload) {
     };
   } finally {
     await conn.end();
+  }
+}
+
+async function listUsers() {
+  const conn = await createMysqlConnection();
+  try {
+    await ensureUserOptionalColumns(conn);
+    const [rows] = await conn.execute(
+      `SELECT
+        id,
+        create_time AS createTime,
+        username,
+        password,
+        status,
+        display_name AS displayName,
+        contact,
+        permission
+      FROM cw_user
+      WHERE status = 1
+      ORDER BY id DESC`
+    );
+    return { ok: true, users: rows };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function createUser(payload) {
+  const username = String(payload.username || '').trim();
+  const password = String(payload.password || '');
+  const displayName = String(payload.displayName || '').trim();
+  const contact = String(payload.contact || '').trim();
+  const permission = ['administrator', 'personnel'].includes(payload.permission)
+    ? payload.permission
+    : 'personnel';
+
+  if (!username) throw new Error('账号不能为空');
+  if (!password) throw new Error('初始密码不能为空');
+  if (password.length < 6) throw new Error('初始密码至少 6 位');
+
+  const conn = await createMysqlConnection();
+  try {
+    await ensureUserOptionalColumns(conn);
+    const [existing] = await conn.execute(
+      'SELECT id FROM cw_user WHERE username = ? AND status = 1 LIMIT 1',
+      [username]
+    );
+    if (existing.length) throw new Error('账号已存在');
+
+    const [result] = await conn.execute(
+      `INSERT INTO cw_user (
+        username,
+        password,
+        status,
+        display_name,
+        contact,
+        permission
+      ) VALUES (?, ?, 1, ?, ?, ?)`,
+      [username, password, displayName, contact, permission]
+    );
+    return { ok: true, id: result.insertId };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function updateUserPassword(id, payload) {
+  const password = String(payload.password || '');
+  if (!id) throw new Error('账号 ID 无效');
+  if (!password) throw new Error('新密码不能为空');
+
+  const conn = await createMysqlConnection();
+  try {
+    const [result] = await conn.execute(
+      'UPDATE cw_user SET password = ? WHERE id = ? AND status = 1',
+      [password, id]
+    );
+    if (!result.affectedRows) throw new Error('账号不存在或已删除');
+    return { ok: true };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function deleteUser(id) {
+  if (!id) throw new Error('账号 ID 无效');
+
+  const conn = await createMysqlConnection();
+  try {
+    const [result] = await conn.execute(
+      'UPDATE cw_user SET status = 0 WHERE id = ? AND status = 1',
+      [id]
+    );
+    if (!result.affectedRows) throw new Error('账号不存在或已删除');
+    return { ok: true };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function createMysqlConnection() {
+  const mysqlConfig = await readMysqlConfig();
+  return mysql.createConnection({
+    host: mysqlConfig.host,
+    port: mysqlConfig.port || 3306,
+    user: mysqlConfig.user,
+    password: mysqlConfig.password,
+    database: mysqlConfig.database
+  });
+}
+
+async function ensureUserOptionalColumns(conn) {
+  const [columns] = await conn.execute('SHOW COLUMNS FROM cw_user');
+  const names = new Set(columns.map(column => column.Field));
+
+  if (!names.has('display_name')) {
+    await conn.execute("ALTER TABLE cw_user ADD COLUMN display_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '姓名/显示名' AFTER username");
+  }
+
+  if (!names.has('contact')) {
+    await conn.execute("ALTER TABLE cw_user ADD COLUMN contact VARCHAR(100) NOT NULL DEFAULT '' COMMENT '联系方式' AFTER display_name");
+  }
+
+  if (!names.has('permission')) {
+    await conn.execute("ALTER TABLE cw_user ADD COLUMN permission ENUM('administrator','personnel') NOT NULL DEFAULT 'personnel' COMMENT '权限' AFTER status");
   }
 }
 

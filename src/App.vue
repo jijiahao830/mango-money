@@ -72,6 +72,15 @@
           >
             对帐单
           </button>
+          <button
+            v-if="isAdministrator"
+            class="nav-button"
+            :class="{ active: activePage === 'accounts' }"
+            type="button"
+            @click="activePage = 'accounts'"
+          >
+            账号管理
+          </button>
         </div>
 
         <div class="nav-user">
@@ -299,6 +308,100 @@
         <p v-if="errorText" class="error-text">{{ errorText }}</p>
       </section>
 
+      <section v-else-if="activePage === 'accounts'" class="account-page">
+        <header class="section-title-row">
+          <div>
+            <h1>管理员账号</h1>
+            <p>可增加账号、删除账号、修改密码，并查看当前保存的账号密码。</p>
+          </div>
+          <span class="count-badge">{{ users.length }} 个</span>
+        </header>
+
+        <section class="card account-create-card">
+          <h2>添加账号</h2>
+          <form class="receipt-form" @submit.prevent="createAccount">
+            <div class="row">
+              <label>
+                <span>账号</span>
+                <input v-model="accountForm.username" placeholder="例如：admin2" required />
+              </label>
+
+              <label>
+                <span>姓名/显示名</span>
+                <input v-model="accountForm.displayName" placeholder="可选" />
+              </label>
+
+              <label>
+                <span>联系方式</span>
+                <input v-model="accountForm.contact" placeholder="可选" />
+              </label>
+
+              <label>
+                <span>权限</span>
+                <select v-model="accountForm.permission">
+                  <option value="personnel">工作人员</option>
+                  <option value="administrator">管理员</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              <span>初始密码</span>
+              <input
+                v-model="accountForm.password"
+                type="password"
+                placeholder="至少 6 位"
+                required
+                minlength="6"
+              />
+            </label>
+
+            <button type="submit" :disabled="isAccountLoading">添加账号</button>
+          </form>
+        </section>
+
+        <div class="account-list">
+          <article v-for="user in users" :key="user.id" class="account-item">
+            <div class="account-info">
+              <div class="account-title-line">
+                <strong>{{ user.displayName || user.username }}</strong>
+                <span class="status-pill">可用</span>
+              </div>
+              <p>
+                账号：{{ user.username }}
+                <template v-if="user.contact"> · 联系方式：{{ user.contact }}</template>
+                · 权限：{{ permissionLabel(user.permission) }}
+                · 创建：{{ formatDisplayDate(user.createTime) }}
+              </p>
+              <div class="password-line">
+                <span>当前密码：</span>
+                <code>{{ visiblePasswords[user.id] ? user.password : maskPassword(user.password) }}</code>
+                <button class="eye-button" type="button" @click="togglePassword(user.id)">
+                  {{ visiblePasswords[user.id] ? '隐藏' : '查看' }}
+                </button>
+              </div>
+            </div>
+
+            <div class="account-actions">
+              <input
+                v-model="newPasswords[user.id]"
+                type="password"
+                placeholder="输入新密码"
+              />
+              <button class="secondary" type="button" :disabled="isAccountLoading" @click="changeAccountPassword(user)">
+                修改密码
+              </button>
+              <button class="danger" type="button" :disabled="isAccountLoading" @click="deleteAccount(user)">
+                删除账号
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <p v-if="accountStatusText" class="status-text">{{ accountStatusText }}</p>
+        <p v-if="accountErrorText" class="error-text">{{ accountErrorText }}</p>
+      </section>
+
       <section v-else class="workspace-page"></section>
     </section>
   </main>
@@ -377,6 +480,19 @@ const loginForm = reactive({
   username: '',
   password: ''
 });
+const accountForm = reactive({
+  username: '',
+  displayName: '',
+  contact: '',
+  password: '',
+  permission: 'personnel'
+});
+const users = ref([]);
+const visiblePasswords = reactive({});
+const newPasswords = reactive({});
+const isAccountLoading = ref(false);
+const accountStatusText = ref('');
+const accountErrorText = ref('');
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -407,6 +523,8 @@ const progressLogoStyle = computed(() => ({
   left: `${progress.value}%`
 }));
 
+const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
+
 const previewTitle = computed(() => (result.type === 'balance' ? '尾款单预览' : '定金单预览'));
 
 const rentalTime = computed(() => {
@@ -433,6 +551,16 @@ watch(balanceRentalTime, (value) => {
 
 watch(balanceReceivedAt, (value) => {
   balanceForm.receivedAt = value ? formatDate(value) : '';
+});
+
+watch(activePage, (value) => {
+  if (value === 'accounts') {
+    if (!isAdministrator.value) {
+      activePage.value = 'home';
+      return;
+    }
+    loadUsers();
+  }
 });
 
 function getPayload() {
@@ -487,6 +615,7 @@ function logout() {
   currentUser.value = null;
   clearForm();
   clearBalanceForm();
+  clearAccountState();
 }
 
 function readStoredUser() {
@@ -681,6 +810,125 @@ async function downloadImage() {
   }
 }
 
+async function loadUsers() {
+  accountErrorText.value = '';
+  accountStatusText.value = '';
+  isAccountLoading.value = true;
+
+  try {
+    const response = await fetch('/api/users');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取账号失败');
+    users.value = data.users || [];
+  } catch (error) {
+    accountErrorText.value = error?.message || String(error);
+  } finally {
+    isAccountLoading.value = false;
+  }
+}
+
+async function createAccount() {
+  accountErrorText.value = '';
+  accountStatusText.value = '';
+  isAccountLoading.value = true;
+
+  try {
+    const response = await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(accountForm)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '添加账号失败');
+
+    accountForm.username = '';
+    accountForm.displayName = '';
+    accountForm.contact = '';
+    accountForm.password = '';
+    accountForm.permission = 'personnel';
+    accountStatusText.value = '账号已添加';
+    await loadUsers();
+  } catch (error) {
+    accountErrorText.value = error?.message || String(error);
+  } finally {
+    isAccountLoading.value = false;
+  }
+}
+
+async function changeAccountPassword(user) {
+  const password = String(newPasswords[user.id] || '');
+  accountErrorText.value = '';
+  accountStatusText.value = '';
+
+  if (!password) {
+    accountErrorText.value = '新密码不能为空';
+    return;
+  }
+
+  isAccountLoading.value = true;
+  try {
+    const response = await fetch(`/api/users/${user.id}/password`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '修改密码失败');
+
+    newPasswords[user.id] = '';
+    accountStatusText.value = '密码已修改';
+    await loadUsers();
+  } catch (error) {
+    accountErrorText.value = error?.message || String(error);
+  } finally {
+    isAccountLoading.value = false;
+  }
+}
+
+async function deleteAccount(user) {
+  accountErrorText.value = '';
+  accountStatusText.value = '';
+
+  if (!window.confirm(`确认删除账号 ${user.username}？`)) return;
+
+  isAccountLoading.value = true;
+  try {
+    const response = await fetch(`/api/users/${user.id}`, {
+      method: 'DELETE'
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '删除账号失败');
+
+    accountStatusText.value = '账号已删除';
+    await loadUsers();
+  } catch (error) {
+    accountErrorText.value = error?.message || String(error);
+  } finally {
+    isAccountLoading.value = false;
+  }
+}
+
+function togglePassword(id) {
+  visiblePasswords[id] = !visiblePasswords[id];
+}
+
+function maskPassword(password) {
+  return '*'.repeat(Math.max(6, String(password || '').length));
+}
+
+function clearAccountState() {
+  users.value = [];
+  accountForm.username = '';
+  accountForm.displayName = '';
+  accountForm.contact = '';
+  accountForm.password = '';
+  accountForm.permission = 'personnel';
+  accountStatusText.value = '';
+  accountErrorText.value = '';
+  for (const key of Object.keys(visiblePasswords)) delete visiblePasswords[key];
+  for (const key of Object.keys(newPasswords)) delete newPasswords[key];
+}
+
 async function saveDjdRecord() {
   const response = await fetch('/api/djd-record', {
     method: 'POST',
@@ -808,5 +1056,16 @@ function formatDate(value) {
 function formatDateTime(value) {
   const [date = '', time = ''] = value.split('T');
   return `${formatDate(date)} ${time}`;
+}
+
+function formatDisplayDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function permissionLabel(permission) {
+  return permission === 'administrator' ? '管理员' : '工作人员';
 }
 </script>
