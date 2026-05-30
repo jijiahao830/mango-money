@@ -84,7 +84,7 @@
         </div>
 
         <div class="nav-user">
-          <span>当前登录：<strong>{{ currentUser.username }}</strong></span>
+          <span>当前登录：<strong>{{ currentDisplayName }}</strong></span>
           <button class="secondary nav-logout" type="button" :disabled="isLoading" @click="logout">退出登录</button>
         </div>
       </nav>
@@ -287,7 +287,7 @@
 
           <label>
             <span>经办人</span>
-            <input v-model="balanceForm.operator" placeholder="不填默认当前登录账号" />
+            <input v-model="balanceForm.operator" placeholder="不填默认当前登录显示名" />
           </label>
 
           <div class="form-actions">
@@ -524,6 +524,7 @@ const progressLogoStyle = computed(() => ({
 }));
 
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
+const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
 
 const previewTitle = computed(() => (result.type === 'balance' ? '尾款单预览' : '定金单预览'));
 
@@ -580,7 +581,7 @@ function getBalancePayload() {
     paymentMethod: balanceForm.paymentMethod.trim(),
     orderRemarkLine1: balanceForm.orderRemarkLine1.trim(),
     orderRemarkLine2: balanceForm.orderRemarkLine2.trim(),
-    operator: balanceForm.operator.trim() || currentUser.value?.username || ''
+    operator: balanceForm.operator.trim() || currentDisplayName.value
   };
 }
 

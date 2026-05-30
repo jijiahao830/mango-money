@@ -281,7 +281,7 @@ async function loginUser(payload) {
   try {
     await ensureUserOptionalColumns(conn);
     const [rows] = await conn.execute(
-      'SELECT id, username, permission FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
+      'SELECT id, username, display_name AS displayName, permission FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
       [username, password]
     );
 
