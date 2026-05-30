@@ -14,7 +14,7 @@
           </label>
 
           <label>
-            <span>客户编号</span>
+            <span>客户编号（不能有中文）</span>
             <input v-model="form.customerId" name="customerId" required />
           </label>
         </div>
@@ -26,7 +26,7 @@
           </label>
 
           <label>
-            <span>订单编号</span>
+            <span>订单编号（不能有中文）</span>
             <input v-model="form.orderId" name="orderId" required />
           </label>
         </div>
@@ -56,7 +56,7 @@
 
         <div class="row">
           <label>
-            <span>定金金额</span>
+            <span>定金金额（只能是数字）</span>
             <input
               v-model="form.depositAmount"
               name="depositAmount"
@@ -66,7 +66,7 @@
           </label>
 
           <label>
-            <span>尾款金额</span>
+            <span>尾款金额（只能是数字）</span>
             <input
               v-model="form.balanceAmount"
               name="balanceAmount"
@@ -201,7 +201,38 @@ function getPayload() {
 }
 
 async function generateReceipt() {
+  const validationError = validateFormValues();
+  if (validationError) {
+    errorText.value = validationError;
+    statusText.value = '';
+    return;
+  }
+
   await renderWithSkill('/api/generate', '正在生成图片。。。');
+}
+
+function validateFormValues() {
+  const errors = [];
+  const chinesePattern = /[\u3400-\u9fff]/;
+  const digitsOnlyPattern = /^\d+$/;
+
+  if (chinesePattern.test(form.customerId)) {
+    errors.push('客户编号不能包含中文');
+  }
+
+  if (chinesePattern.test(form.orderId)) {
+    errors.push('订单编号不能包含中文');
+  }
+
+  if (!digitsOnlyPattern.test(String(form.depositAmount).trim())) {
+    errors.push('定金金额只能是数字');
+  }
+
+  if (!digitsOnlyPattern.test(String(form.balanceAmount).trim())) {
+    errors.push('尾款金额只能是数字');
+  }
+
+  return errors.join('\n');
 }
 
 async function renderWithSkill(url, loadingText) {
