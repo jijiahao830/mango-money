@@ -848,13 +848,10 @@ async function downloadImage() {
   if (!result.imageUrl) return;
 
   try {
-    if (!result.recordSaved) {
-      if (result.type === 'balance') {
-        await saveWkdRecord();
-      } else {
-        await saveDjdRecord();
-      }
-      result.recordSaved = true;
+    if (result.type === 'balance') {
+      await saveWkdRecord();
+    } else {
+      await saveDjdRecord();
     }
 
     const link = document.createElement('a');
@@ -917,13 +914,10 @@ async function pushCurrentImage() {
   statusText.value = '正在推送图片...';
 
   try {
-    if (!result.recordSaved) {
-      if (result.type === 'balance') {
-        await saveWkdRecord();
-      } else {
-        await saveDjdRecord();
-      }
-      result.recordSaved = true;
+    if (result.type === 'balance') {
+      await saveWkdRecord();
+    } else {
+      await saveDjdRecord();
     }
 
     const response = await fetch('/api/push-wecom', {
