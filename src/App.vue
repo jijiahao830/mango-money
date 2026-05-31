@@ -917,6 +917,15 @@ async function pushCurrentImage() {
   statusText.value = '正在推送图片...';
 
   try {
+    if (!result.recordSaved) {
+      if (result.type === 'balance') {
+        await saveWkdRecord();
+      } else {
+        await saveDjdRecord();
+      }
+      result.recordSaved = true;
+    }
+
     const response = await fetch('/api/push-wecom', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
