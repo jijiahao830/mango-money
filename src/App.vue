@@ -109,19 +109,19 @@
         <div class="row">
           <label>
             <span>客户名</span>
-            <input v-model="form.customerName" name="customerName" required />
+            <input v-model="form.customerName" name="customerName" />
           </label>
 
           <label>
             <span>客户编号（不能有中文）</span>
-            <input v-model="form.customerId" name="customerId" required />
+            <input v-model="form.customerId" name="customerId" />
           </label>
         </div>
 
         <div class="row">
           <label>
             <span>车型名</span>
-            <input v-model="form.carModel" name="carModel" required />
+            <input v-model="form.carModel" name="carModel" />
           </label>
 
           <label>
@@ -134,12 +134,12 @@
           <div class="calendar-row">
             <label>
               <span>取车时间</span>
-              <input v-model="pickupAt" type="date" required />
+              <input v-model="pickupAt" type="date" />
             </label>
 
             <label>
               <span>还车时间</span>
-              <input v-model="dropoffAt" type="date" required />
+              <input v-model="dropoffAt" type="date" />
             </label>
           </div>
         </div>
@@ -160,7 +160,6 @@
               v-model="form.depositAmount"
               name="depositAmount"
               inputmode="decimal"
-              required
             />
           </label>
 
@@ -170,7 +169,6 @@
               v-model="form.balanceAmount"
               name="balanceAmount"
               inputmode="decimal"
-              required
             />
           </label>
         </div>
@@ -181,7 +179,6 @@
             v-model="holdUntilAt"
             type="datetime-local"
             name="holdUntil"
-            required
           />
         </label>
 
@@ -212,19 +209,19 @@
           <div class="row">
             <label>
               <span>客户名</span>
-              <input v-model="balanceForm.customerName" required />
+              <input v-model="balanceForm.customerName" />
             </label>
 
             <label>
               <span>客户编号（不能有中文）</span>
-              <input v-model="balanceForm.customerId" required />
+              <input v-model="balanceForm.customerId" />
             </label>
           </div>
 
           <div class="row">
             <label>
               <span>车型名</span>
-              <input v-model="balanceForm.carModel" required />
+              <input v-model="balanceForm.carModel" />
             </label>
 
             <label>
@@ -237,12 +234,12 @@
             <div class="calendar-row">
               <label>
                 <span>开始用车时间</span>
-                <input v-model="balancePickupAt" type="date" required />
+                <input v-model="balancePickupAt" type="date" />
               </label>
 
               <label>
                 <span>收款时间</span>
-                <input v-model="balanceReceivedAt" type="date" required />
+                <input v-model="balanceReceivedAt" type="date" />
               </label>
             </div>
           </div>
@@ -252,7 +249,6 @@
               <span>用车方式</span>
               <select
                 v-model="balanceForm.pickupDropoffMethod"
-                required
               >
                 <option value="" disabled>请选择用车方式</option>
                 <option value="配驾服务">配驾服务</option>
@@ -262,19 +258,19 @@
 
             <label>
               <span>支付方式</span>
-              <input v-model="balanceForm.paymentMethod" required />
+              <input v-model="balanceForm.paymentMethod" />
             </label>
           </div>
 
           <div class="row">
             <label>
               <span>合计收款金额（只能是数字，可有小数点）</span>
-              <input v-model="balanceForm.balanceAmount" inputmode="decimal" required />
+              <input v-model="balanceForm.balanceAmount" inputmode="decimal" />
             </label>
 
             <label>
               <span>单价</span>
-              <input v-model="balanceForm.unitPrice" required />
+              <input v-model="balanceForm.unitPrice" />
             </label>
           </div>
 
@@ -302,6 +298,213 @@
           <div class="form-actions">
             <button type="button" :disabled="isLoading" @click="generateBalanceReceipt">生成</button>
             <button class="secondary" type="button" :disabled="isLoading" @click="clearBalanceForm">清空</button>
+          </div>
+        </form>
+
+        <div v-if="isLoading" class="progress-wrap" aria-label="正在生成">
+          <div class="progress-track">
+            <div class="progress-fill" :style="{ width: `${progress}%` }"></div>
+            <img class="progress-logo" :src="orangeLogo" alt="" :style="progressLogoStyle" />
+            <span class="progress-percent">{{ progress }}%</span>
+          </div>
+        </div>
+
+        <p v-if="statusText" class="status-text">{{ statusText }}</p>
+        <p v-if="errorText" class="error-text">{{ errorText }}</p>
+      </section>
+
+      <section v-else-if="activePage === 'statement'" class="card form-card">
+        <header class="page-header compact">
+          <h1>对帐单生成</h1>
+        </header>
+
+        <form ref="statementFormRef" class="receipt-form">
+          <div class="form-section">
+            <h2>基础信息</h2>
+            <div class="row">
+              <label>
+                <span>客户姓名</span>
+                <input v-model="statementForm.customerName" />
+              </label>
+
+              <label>
+                <span>订单编号（不能有中文）</span>
+                <input v-model="statementForm.orderId" required />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>本次结算结果</h2>
+            <div class="row">
+              <label>
+                <span>已收金额</span>
+                <input v-model="statementForm.receivedAmount" inputmode="decimal" />
+              </label>
+              <label>
+                <span>实际消费</span>
+                <input v-model="statementForm.actualConsumption" inputmode="decimal" />
+              </label>
+              <label>
+                <span>应退金额</span>
+                <input v-model="statementForm.refundableDeposit" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>消费明细</h2>
+            <div class="row">
+              <label>
+                <span>车辆租金-说明</span>
+                <input v-model="statementForm.carRentalDesc" />
+              </label>
+              <label>
+                <span>车辆租金-金额</span>
+                <input v-model="statementForm.carRentalAmount" inputmode="decimal" />
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <span>超时费用-说明（可以不填，不填显示——）</span>
+                <input v-model="statementForm.overtimeDesc" />
+              </label>
+              <label>
+                <span>超时费用-金额</span>
+                <input v-model="statementForm.overtimeAmount" inputmode="decimal" />
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <span>补油费用-说明（可以不填，不填显示——）</span>
+                <input v-model="statementForm.fuelDesc" />
+              </label>
+              <label>
+                <span>补油费用-金额</span>
+                <input v-model="statementForm.fuelAmount" inputmode="decimal" />
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <span>其他费用-说明（可以不填，不填显示——）</span>
+                <input v-model="statementForm.otherDesc" />
+              </label>
+              <label>
+                <span>其他费用-金额</span>
+                <input v-model="statementForm.otherAmount" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>消费说明</h2>
+            <div v-for="index in 6" :key="`statement-note-${index}`" class="row">
+              <label>
+                <span>消费说明{{ index }}（可以不填）</span>
+                <input v-model="statementForm[`consumptionNote${index}`]" />
+              </label>
+              <label>
+                <span>消费说明{{ index }}-金额（可以不填，不填显示——）</span>
+                <input v-model="statementForm[`consumptionNote${index}Amount`]" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>用车记录</h2>
+            <div class="row">
+              <label><span>车型</span><input v-model="statementForm.carModel" /></label>
+              <label><span>车牌</span><input v-model="statementForm.plateNumber" /></label>
+            </div>
+            <div class="row">
+              <label><span>出车时间</span><input v-model="statementForm.startAt" /></label>
+              <label><span>回车时间</span><input v-model="statementForm.returnAt" /></label>
+            </div>
+            <div class="row">
+              <label><span>用车天数</span><input v-model="statementForm.useDays" /></label>
+              <label><span>出车公里</span><input v-model="statementForm.startMileage" /></label>
+            </div>
+            <div class="row">
+              <label><span>回车公里</span><input v-model="statementForm.returnMileage" /></label>
+              <label><span>实际行驶</span><input v-model="statementForm.actualMileage" /></label>
+            </div>
+            <div class="row">
+              <label><span>出车油量</span><input v-model="statementForm.startFuel" /></label>
+              <label><span>回车油量</span><input v-model="statementForm.returnFuel" /></label>
+              <label><span>补油量</span><input v-model="statementForm.refuelAmount" /></label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>车辆检查结果</h2>
+            <div class="row">
+              <label>
+                <span>有无新增磕碰</span>
+                <select v-model="statementForm.checkScratch">
+                  <option value="无">无</option>
+                  <option value="有">有</option>
+                </select>
+              </label>
+              <label>
+                <span>有无新增划痕</span>
+                <select v-model="statementForm.checkMark">
+                  <option value="无">无</option>
+                  <option value="有">有</option>
+                </select>
+              </label>
+              <label>
+                <span>有无事故记录</span>
+                <select v-model="statementForm.checkAccident">
+                  <option value="无">无</option>
+                  <option value="有">有</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <span>有无超公里费用</span>
+                <select v-model="statementForm.checkOverMileage">
+                  <option value="无">无</option>
+                  <option value="有">有</option>
+                </select>
+              </label>
+              <label>
+                <span>有无超时费用</span>
+                <select v-model="statementForm.checkOvertime">
+                  <option value="无">无</option>
+                  <option value="有">有</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>异常说明</h2>
+            <div v-for="index in 9" :key="`statement-abnormal-${index}`" class="row">
+              <label>
+                <span>异常说明{{ index }}（可以不填）</span>
+                <input v-model="statementForm[`abnormalNote${index}`]" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-section">
+            <h2>押金信息</h2>
+            <div class="row">
+              <label>
+                <span>车辆押金</span>
+                <input v-model="statementForm.vehicleDeposit" inputmode="decimal" />
+              </label>
+              <label>
+                <span>违章押金</span>
+                <input v-model="statementForm.violationDeposit" inputmode="decimal" />
+              </label>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" :disabled="isLoading" @click="generateStatementReceipt">生成</button>
+            <button class="secondary" type="button" :disabled="isLoading" @click="clearStatementForm">清空</button>
           </div>
         </form>
 
@@ -507,6 +710,61 @@ const balanceForm = reactive({
   operator: ''
 });
 
+const statementForm = reactive({
+  customerName: '',
+  orderId: '',
+  receivedAmount: '',
+  actualConsumption: '',
+  refundableDeposit: '',
+  carRentalDesc: '',
+  carRentalAmount: '',
+  overtimeDesc: '',
+  overtimeAmount: '',
+  fuelDesc: '',
+  fuelAmount: '',
+  otherDesc: '',
+  otherAmount: '',
+  consumptionNote1: '',
+  consumptionNote1Amount: '',
+  consumptionNote2: '',
+  consumptionNote2Amount: '',
+  consumptionNote3: '',
+  consumptionNote3Amount: '',
+  consumptionNote4: '',
+  consumptionNote4Amount: '',
+  consumptionNote5: '',
+  consumptionNote5Amount: '',
+  consumptionNote6: '',
+  consumptionNote6Amount: '',
+  carModel: '',
+  plateNumber: '',
+  startAt: '',
+  returnAt: '',
+  useDays: '',
+  startMileage: '',
+  returnMileage: '',
+  actualMileage: '',
+  startFuel: '',
+  returnFuel: '',
+  refuelAmount: '',
+  checkScratch: '无',
+  checkMark: '无',
+  checkAccident: '无',
+  checkOverMileage: '无',
+  checkOvertime: '无',
+  abnormalNote1: '',
+  abnormalNote2: '',
+  abnormalNote3: '',
+  abnormalNote4: '',
+  abnormalNote5: '',
+  abnormalNote6: '',
+  abnormalNote7: '',
+  abnormalNote8: '',
+  abnormalNote9: '',
+  vehicleDeposit: '',
+  violationDeposit: ''
+});
+
 const DEFAULT_PICKUP_DROPOFF_METHOD = '昆明 · 到店取车';
 const STORED_USER_KEY = 'mango_finance_user';
 
@@ -545,6 +803,7 @@ const balancePickupAt = ref('');
 const balanceReceivedAt = ref('');
 const receiptForm = ref(null);
 const balanceFormRef = ref(null);
+const statementFormRef = ref(null);
 const isLoading = ref(false);
 const isPreviewOpen = ref(false);
 const statusText = ref('');
@@ -573,7 +832,11 @@ const progressLogoStyle = computed(() => ({
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
 
-const previewTitle = computed(() => (result.type === 'balance' ? '尾款单预览' : '定金单预览'));
+const previewTitle = computed(() => {
+  if (result.type === 'balance') return '尾款单预览';
+  if (result.type === 'statement') return '对帐单预览';
+  return '定金单预览';
+});
 
 const rentalTime = computed(() => {
   if (!pickupAt.value || !dropoffAt.value) return '';
@@ -640,6 +903,12 @@ function getBalancePayload() {
   };
 }
 
+function getStatementPayload() {
+  return Object.fromEntries(
+    Object.entries(statementForm).map(([key, value]) => [key, String(value ?? '').trim()])
+  );
+}
+
 async function login() {
   loginError.value = '';
   isLoginLoading.value = true;
@@ -671,6 +940,7 @@ function logout() {
   currentUser.value = null;
   clearForm();
   clearBalanceForm();
+  clearStatementForm();
   clearAccountState();
 }
 
@@ -704,26 +974,24 @@ async function generateBalanceReceipt() {
   await renderWithSkill('/api/generate-balance', '正在生成图片。。。', getBalancePayload(), 'balance', balanceFormRef.value);
 }
 
+async function generateStatementReceipt() {
+  const validationError = validateStatementFormValues();
+  if (validationError) {
+    errorText.value = validationError;
+    statusText.value = '';
+    return;
+  }
+
+  await renderWithSkill('/api/generate-statement', '正在生成图片。。。', getStatementPayload(), 'statement', statementFormRef.value);
+}
+
 function validateFormValues() {
   const errors = [];
   const chinesePattern = /[\u3400-\u9fff]/;
   const digitsOnlyPattern = /^\d+$/;
-  const requiredFields = [
-    ['客户名', form.customerName],
-    ['客户编号', form.customerId],
-    ['车型名', form.carModel],
-    ['订单编号', form.orderId],
-    ['取车时间', pickupAt.value],
-    ['还车时间', dropoffAt.value],
-    ['定金金额', form.depositAmount],
-    ['尾款金额', form.balanceAmount],
-    ['保留截止时间', holdUntilAt.value]
-  ];
 
-  for (const [label, value] of requiredFields) {
-    if (String(value ?? '').trim() === '') {
-      errors.push(`${label}不能为空`);
-    }
+  if (String(form.orderId ?? '').trim() === '') {
+    errors.push('订单编号不能为空');
   }
 
   if (chinesePattern.test(form.customerId)) {
@@ -734,11 +1002,11 @@ function validateFormValues() {
     errors.push('订单编号不能包含中文');
   }
 
-  if (!digitsOnlyPattern.test(String(form.depositAmount).trim())) {
+  if (String(form.depositAmount).trim() && !digitsOnlyPattern.test(String(form.depositAmount).trim())) {
     errors.push('定金金额只能是数字');
   }
 
-  if (!digitsOnlyPattern.test(String(form.balanceAmount).trim())) {
+  if (String(form.balanceAmount).trim() && !digitsOnlyPattern.test(String(form.balanceAmount).trim())) {
     errors.push('尾款金额只能是数字');
   }
 
@@ -749,23 +1017,9 @@ function validateBalanceFormValues() {
   const errors = [];
   const chinesePattern = /[\u3400-\u9fff]/;
   const moneyPattern = /^\d+(\.\d+)?$/;
-  const requiredFields = [
-    ['客户名', balanceForm.customerName],
-    ['客户编号', balanceForm.customerId],
-    ['车型名', balanceForm.carModel],
-    ['订单编号', balanceForm.orderId],
-    ['开始用车时间', balancePickupAt.value],
-    ['收款时间', balanceReceivedAt.value],
-    ['用车方式', balanceForm.pickupDropoffMethod],
-    ['支付方式', balanceForm.paymentMethod],
-    ['合计收款金额', balanceForm.balanceAmount],
-    ['单价', balanceForm.unitPrice]
-  ];
 
-  for (const [label, value] of requiredFields) {
-    if (String(value ?? '').trim() === '') {
-      errors.push(`${label}不能为空`);
-    }
+  if (String(balanceForm.orderId ?? '').trim() === '') {
+    errors.push('订单编号不能为空');
   }
 
   if (chinesePattern.test(balanceForm.customerId)) {
@@ -776,8 +1030,23 @@ function validateBalanceFormValues() {
     errors.push('订单编号不能包含中文');
   }
 
-  if (!moneyPattern.test(String(balanceForm.balanceAmount).trim())) {
+  if (String(balanceForm.balanceAmount).trim() && !moneyPattern.test(String(balanceForm.balanceAmount).trim())) {
     errors.push('合计收款金额只能是数字，可有小数点');
+  }
+
+  return errors.join('\n');
+}
+
+function validateStatementFormValues() {
+  const errors = [];
+  const chinesePattern = /[\u3400-\u9fff]/;
+
+  if (String(statementForm.orderId ?? '').trim() === '') {
+    errors.push('订单编号不能为空');
+  }
+
+  if (chinesePattern.test(statementForm.orderId)) {
+    errors.push('订单编号不能包含中文');
   }
 
   return errors.join('\n');
@@ -848,7 +1117,9 @@ async function downloadImage() {
   if (!result.imageUrl) return;
 
   try {
-    if (result.type === 'balance') {
+    if (result.type === 'statement') {
+      await saveZdRecord();
+    } else if (result.type === 'balance') {
       await saveWkdRecord();
     } else {
       await saveDjdRecord();
@@ -914,7 +1185,9 @@ async function pushCurrentImage() {
   statusText.value = '正在推送图片...';
 
   try {
-    if (result.type === 'balance') {
+    if (result.type === 'statement') {
+      await saveZdRecord();
+    } else if (result.type === 'balance') {
       await saveWkdRecord();
     } else {
       await saveDjdRecord();
@@ -1094,6 +1367,22 @@ async function saveWkdRecord() {
   }
 }
 
+async function saveZdRecord() {
+  const response = await fetch('/api/zd-record', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...getStatementPayload(),
+      createUser: currentUser.value?.username || ''
+    })
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || '记录对帐单失败');
+  }
+}
+
 function getFilenameFromResponse(response) {
   const raw = response.headers.get('X-Filename');
   return raw ? decodeURIComponent(raw) : '';
@@ -1183,6 +1472,25 @@ function clearBalanceForm() {
   result.recordSaved = false;
   result.pushed = false;
   result.type = 'balance';
+  statusText.value = '';
+  errorText.value = '';
+  progress.value = 0;
+  stopProgress();
+  isPreviewOpen.value = false;
+  resetView();
+}
+
+function clearStatementForm() {
+  for (const key of Object.keys(statementForm)) {
+    statementForm[key] = key.startsWith('check') ? '无' : '';
+  }
+  revokePreviewObjectUrl();
+  result.imageUrl = '';
+  result.webpName = '';
+  result.fileDate = '';
+  result.recordSaved = false;
+  result.pushed = false;
+  result.type = 'statement';
   statusText.value = '';
   errorText.value = '';
   progress.value = 0;

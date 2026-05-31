@@ -25,6 +25,12 @@ const SKILLS = {
     root: path.join(RUNTIME_DIR, 'mango-finance-balance-receipt'),
     scriptName: 'render_balance.mjs',
     patchRuntime: false
+  },
+  statement: {
+    file: path.join(ROOT_DIR, 'skills', 'mango-finance-statement-receipt.skill'),
+    root: path.join(RUNTIME_DIR, 'mango-finance-statement-receipt'),
+    scriptName: 'render_statement.mjs',
+    patchRuntime: false
   }
 };
 const OUTPUT_ROOT = RUNTIME_DIR;
@@ -55,6 +61,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/generate-balance') {
       const payload = await readJsonBody(req);
       const result = await renderReceipt(payload, 'balance');
+      await sendGeneratedWebp(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/generate-statement') {
+      const payload = await readJsonBody(req);
+      const result = await renderReceipt(payload, 'statement');
       await sendGeneratedWebp(res, result);
       return;
     }
@@ -124,6 +137,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/wkd-record') {
       const payload = await readJsonBody(req);
       const result = await saveWkdRecord(payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/zd-record') {
+      const payload = await readJsonBody(req);
+      const result = await saveZdRecord(payload);
       sendJson(res, result);
       return;
     }
@@ -273,9 +293,136 @@ async function saveWkdRecord(payload) {
         payload.paymentMethod,
         payload.orderRemarkLine1 || '',
         payload.orderRemarkLine2 || '',
-        payload.receivedAt,
+        normalizeMysqlDateTime(payload.receivedAt),
         payload.operator
       ]
+    );
+    return { ok: true, id: result.insertId };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function saveZdRecord(payload) {
+  validateZdPayload(payload);
+
+  const conn = await createMysqlConnection();
+  try {
+    await ensureStatementTable(conn);
+    const fields = [
+      'create_user',
+      'customer_name',
+      'order_id',
+      'received_amount',
+      'actual_consumption',
+      'refundable_deposit',
+      'car_rental_desc',
+      'car_rental_amount',
+      'overtime_desc',
+      'overtime_amount',
+      'fuel_desc',
+      'fuel_amount',
+      'other_desc',
+      'other_amount',
+      'consumption_note1',
+      'consumption_note1_amount',
+      'consumption_note2',
+      'consumption_note2_amount',
+      'consumption_note3',
+      'consumption_note3_amount',
+      'consumption_note4',
+      'consumption_note4_amount',
+      'consumption_note5',
+      'consumption_note5_amount',
+      'consumption_note6',
+      'consumption_note6_amount',
+      'car_model',
+      'plate_number',
+      'start_at',
+      'return_at',
+      'use_days',
+      'start_mileage',
+      'return_mileage',
+      'actual_mileage',
+      'start_fuel',
+      'return_fuel',
+      'refuel_amount',
+      'check_scratch',
+      'check_mark',
+      'check_accident',
+      'check_over_mileage',
+      'check_overtime',
+      'abnormal_note1',
+      'abnormal_note2',
+      'abnormal_note3',
+      'abnormal_note4',
+      'abnormal_note5',
+      'abnormal_note6',
+      'abnormal_note7',
+      'abnormal_note8',
+      'abnormal_note9',
+      'vehicle_deposit',
+      'violation_deposit'
+    ];
+    const values = [
+      payload.createUser,
+      payload.customerName,
+      payload.orderId,
+      payload.receivedAmount,
+      payload.actualConsumption,
+      payload.refundableDeposit,
+      payload.carRentalDesc,
+      payload.carRentalAmount,
+      payload.overtimeDesc,
+      payload.overtimeAmount,
+      payload.fuelDesc,
+      payload.fuelAmount,
+      payload.otherDesc,
+      payload.otherAmount,
+      payload.consumptionNote1,
+      payload.consumptionNote1Amount,
+      payload.consumptionNote2,
+      payload.consumptionNote2Amount,
+      payload.consumptionNote3,
+      payload.consumptionNote3Amount,
+      payload.consumptionNote4,
+      payload.consumptionNote4Amount,
+      payload.consumptionNote5,
+      payload.consumptionNote5Amount,
+      payload.consumptionNote6,
+      payload.consumptionNote6Amount,
+      payload.carModel,
+      payload.plateNumber,
+      payload.startAt,
+      payload.returnAt,
+      payload.useDays,
+      payload.startMileage,
+      payload.returnMileage,
+      payload.actualMileage,
+      payload.startFuel,
+      payload.returnFuel,
+      payload.refuelAmount,
+      payload.checkScratch,
+      payload.checkMark,
+      payload.checkAccident,
+      payload.checkOverMileage,
+      payload.checkOvertime,
+      payload.abnormalNote1,
+      payload.abnormalNote2,
+      payload.abnormalNote3,
+      payload.abnormalNote4,
+      payload.abnormalNote5,
+      payload.abnormalNote6,
+      payload.abnormalNote7,
+      payload.abnormalNote8,
+      payload.abnormalNote9,
+      payload.vehicleDeposit,
+      payload.violationDeposit
+    ].map(value => value === undefined || value === null ? '' : String(value));
+
+    const [result] = await conn.execute(
+      `INSERT INTO cw_zd (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
+      values
     );
     return { ok: true, id: result.insertId };
   } finally {
@@ -577,6 +724,68 @@ async function ensureUserOptionalColumns(conn) {
   }
 }
 
+async function ensureStatementTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_zd (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    create_user VARCHAR(100) NOT NULL DEFAULT '' COMMENT '创建人员',
+    customer_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '客户姓名',
+    order_id VARCHAR(100) NOT NULL DEFAULT '' COMMENT '订单编号',
+    received_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '已收金额',
+    actual_consumption VARCHAR(50) NOT NULL DEFAULT '' COMMENT '实际消费',
+    refundable_deposit VARCHAR(50) NOT NULL DEFAULT '' COMMENT '应退金额',
+    car_rental_desc VARCHAR(255) NOT NULL DEFAULT '' COMMENT '车辆租金说明',
+    car_rental_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '车辆租金金额',
+    overtime_desc VARCHAR(255) NOT NULL DEFAULT '' COMMENT '超时费用说明',
+    overtime_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '超时费用金额',
+    fuel_desc VARCHAR(255) NOT NULL DEFAULT '' COMMENT '补油费用说明',
+    fuel_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '补油费用金额',
+    other_desc VARCHAR(255) NOT NULL DEFAULT '' COMMENT '其他费用说明',
+    other_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '其他费用金额',
+    consumption_note1 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明1',
+    consumption_note1_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明1金额',
+    consumption_note2 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明2',
+    consumption_note2_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明2金额',
+    consumption_note3 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明3',
+    consumption_note3_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明3金额',
+    consumption_note4 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明4',
+    consumption_note4_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明4金额',
+    consumption_note5 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明5',
+    consumption_note5_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明5金额',
+    consumption_note6 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '消费说明6',
+    consumption_note6_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '消费说明6金额',
+    car_model VARCHAR(100) NOT NULL DEFAULT '' COMMENT '车型',
+    plate_number VARCHAR(100) NOT NULL DEFAULT '' COMMENT '车牌',
+    start_at VARCHAR(100) NOT NULL DEFAULT '' COMMENT '出车时间',
+    return_at VARCHAR(100) NOT NULL DEFAULT '' COMMENT '回车时间',
+    use_days VARCHAR(50) NOT NULL DEFAULT '' COMMENT '用车天数',
+    start_mileage VARCHAR(50) NOT NULL DEFAULT '' COMMENT '出车公里',
+    return_mileage VARCHAR(50) NOT NULL DEFAULT '' COMMENT '回车公里',
+    actual_mileage VARCHAR(50) NOT NULL DEFAULT '' COMMENT '实际行驶',
+    start_fuel VARCHAR(50) NOT NULL DEFAULT '' COMMENT '出车油量',
+    return_fuel VARCHAR(50) NOT NULL DEFAULT '' COMMENT '回车油量',
+    refuel_amount VARCHAR(50) NOT NULL DEFAULT '' COMMENT '补油量',
+    check_scratch VARCHAR(10) NOT NULL DEFAULT '' COMMENT '新增磕碰',
+    check_mark VARCHAR(10) NOT NULL DEFAULT '' COMMENT '新增划痕',
+    check_accident VARCHAR(10) NOT NULL DEFAULT '' COMMENT '事故记录',
+    check_over_mileage VARCHAR(10) NOT NULL DEFAULT '' COMMENT '超公里费用',
+    check_overtime VARCHAR(10) NOT NULL DEFAULT '' COMMENT '超时费用',
+    abnormal_note1 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明1',
+    abnormal_note2 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明2',
+    abnormal_note3 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明3',
+    abnormal_note4 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明4',
+    abnormal_note5 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明5',
+    abnormal_note6 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明6',
+    abnormal_note7 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明7',
+    abnormal_note8 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明8',
+    abnormal_note9 VARCHAR(255) NOT NULL DEFAULT '' COMMENT '异常说明9',
+    vehicle_deposit VARCHAR(50) NOT NULL DEFAULT '' COMMENT '车辆押金',
+    violation_deposit VARCHAR(50) NOT NULL DEFAULT '' COMMENT '违章押金',
+    INDEX idx_order_id (order_id),
+    INDEX idx_create_time (create_time)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='对帐单生成表'`);
+}
+
 async function readMysqlConfig() {
   const config = await readAppConfig();
   return config.mysql || {};
@@ -595,15 +804,7 @@ async function writeAppConfig(config) {
 
 function validateDjdPayload(payload) {
   const required = [
-    'customerName',
-    'customerId',
-    'carModel',
     'orderId',
-    'rentalTime',
-    'pickupDropoffMethod',
-    'depositAmount',
-    'balanceAmount',
-    'holdUntil',
     'createUser'
   ];
 
@@ -615,17 +816,19 @@ function validateDjdPayload(payload) {
 
 function validateWkdPayload(payload) {
   const required = [
-    'customerName',
-    'customerId',
-    'carModel',
     'orderId',
-    'rentalTime',
-    'pickupDropoffMethod',
-    'balanceAmount',
-    'unitPrice',
-    'paymentMethod',
-    'receivedAt',
-    'operator',
+    'createUser'
+  ];
+
+  const missing = required.filter(key => payload[key] === undefined || String(payload[key]).trim() === '');
+  if (missing.length) {
+    throw new Error(`缺少字段：${missing.join(', ')}`);
+  }
+}
+
+function validateZdPayload(payload) {
+  const required = [
+    'orderId',
     'createUser'
   ];
 
@@ -636,7 +839,8 @@ function validateWkdPayload(payload) {
 }
 
 function normalizeMysqlDateTime(value) {
-  return String(value).replace(/\./g, '-');
+  const normalized = String(value || '').trim().replace(/\./g, '-');
+  return normalized || null;
 }
 
 async function sendGeneratedWebp(res, result) {
