@@ -3,6 +3,7 @@ import fsp from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
@@ -93,6 +94,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/push-config') {
+      const result = await getPushConfig();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/push-config') {
+      const payload = await readJsonBody(req);
+      const result = await savePushConfig(payload);
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/push-wecom') {
+      const payload = await readJsonBody(req);
+      const result = await pushGeneratedImageToWecom(payload);
+      sendJson(res, result);
+      return;
+    }
+
     if (req.method === 'POST' && url.pathname === '/api/djd-record') {
       const payload = await readJsonBody(req);
       const result = await saveDjdRecord(payload);
@@ -159,7 +180,8 @@ async function renderReceipt(payload, type = 'deposit') {
 
   return {
     imagePath: archivedWebpPath,
-    webpName: path.basename(archivedWebpPath)
+    webpName: path.basename(archivedWebpPath),
+    fileDate: path.basename(path.dirname(archivedWebpPath))
   };
 }
 
@@ -397,6 +419,136 @@ async function deleteUser(id) {
   }
 }
 
+async function getPushConfig() {
+  const config = await readAppConfig();
+  return {
+    ok: true,
+    webhook: config.wecom?.webhook || ''
+  };
+}
+
+async function savePushConfig(payload) {
+  const webhook = String(payload.webhook || '').trim();
+  if (webhook && !/^https:\/\/qyapi\.weixin\.qq\.com\/cgi-bin\/webhook\/send\?key=/.test(webhook)) {
+    throw new Error('企业微信 Webhook 地址格式不正确');
+  }
+
+  const config = await readAppConfig();
+  config.wecom = {
+    ...(config.wecom || {}),
+    webhook
+  };
+  await writeAppConfig(config);
+  return { ok: true };
+}
+
+async function pushGeneratedImageToWecom(payload) {
+  const fileDate = String(payload.fileDate || '').trim();
+  const fileName = String(payload.fileName || '').trim();
+  if (!fileDate || !fileName) throw new Error('缺少要推送的图片信息，请重新生成图片');
+
+  const config = await readAppConfig();
+  const webhook = String(config.wecom?.webhook || '').trim();
+  if (!webhook) throw new Error('请先配置企业微信 Webhook 地址');
+
+  const imagePath = resolveCreateFilePath(fileDate, fileName);
+  const stat = await fsp.stat(imagePath).catch(() => null);
+  if (!stat || !stat.isFile()) throw new Error('未找到生成的图片文件，请重新生成后再推送');
+
+  const jpgPath = await convertWebpToJpg(imagePath);
+  try {
+    const imageBuffer = await fsp.readFile(jpgPath);
+    const body = {
+      msgtype: 'image',
+      image: {
+        base64: imageBuffer.toString('base64'),
+        md5: crypto.createHash('md5').update(imageBuffer).digest('hex')
+      }
+    };
+
+    const response = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.errcode) {
+      throw new Error(data.errmsg || `企业微信推送失败：${response.status}`);
+    }
+    return { ok: true };
+  } finally {
+    await fsp.rm(jpgPath, { force: true }).catch(() => {});
+  }
+}
+
+function resolveCreateFilePath(fileDate, fileName) {
+  const safeDate = decodePathRelative(fileDate);
+  const safeName = decodePathRelative(fileName);
+  const filePath = path.normalize(path.join(CREATE_FILE_ROOT, safeDate, safeName));
+  const relative = path.relative(CREATE_FILE_ROOT, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('图片路径无效');
+  }
+  return filePath;
+}
+
+async function convertWebpToJpg(inputPath) {
+  const tmpDir = getMangoTmpDir();
+  await fsp.mkdir(tmpDir, { recursive: true });
+  const converters = [
+    {
+      name: 'ffmpeg',
+      makeArgs: outputPath => ['-y', '-loglevel', 'error', '-i', inputPath, '-frames:v', '1', '-q:v', '5', outputPath]
+    },
+    {
+      name: 'ffmpeg',
+      makeArgs: outputPath => ['-y', '-loglevel', 'error', '-i', inputPath, '-frames:v', '1', '-q:v', '9', outputPath]
+    },
+    {
+      name: 'ffmpeg',
+      makeArgs: outputPath => ['-y', '-loglevel', 'error', '-i', inputPath, '-frames:v', '1', '-q:v', '13', outputPath]
+    },
+    {
+      name: 'magick',
+      makeArgs: outputPath => [inputPath, '-background', 'white', '-alpha', 'remove', '-alpha', 'off', '-quality', '82', outputPath]
+    },
+    {
+      name: 'magick',
+      makeArgs: outputPath => [inputPath, '-background', 'white', '-alpha', 'remove', '-alpha', 'off', '-quality', '70', outputPath]
+    },
+    {
+      name: 'convert',
+      makeArgs: outputPath => [inputPath, '-background', 'white', '-alpha', 'remove', '-alpha', 'off', '-quality', '82', outputPath]
+    },
+    {
+      name: 'convert',
+      makeArgs: outputPath => [inputPath, '-background', 'white', '-alpha', 'remove', '-alpha', 'off', '-quality', '70', outputPath]
+    }
+  ];
+
+  const errors = [];
+  for (let index = 0; index < converters.length; index += 1) {
+    const converter = converters[index];
+    const outputPath = path.join(tmpDir, `${path.basename(inputPath, path.extname(inputPath))}-${Date.now()}-${index}.jpg`);
+    try {
+      execFileSync(converter.name, converter.makeArgs(outputPath), { stdio: 'pipe', env: { ...process.env, PATH: normalizePath(process.env.PATH) } });
+      const stat = await fsp.stat(outputPath).catch(() => null);
+      if (stat?.isFile() && stat.size > 0 && stat.size <= 2 * 1024 * 1024) return outputPath;
+      if (stat?.isFile() && stat.size > 2 * 1024 * 1024) {
+        errors.push(`${converter.name}: JPG 超过 2MB (${stat.size} bytes)`);
+        await fsp.rm(outputPath, { force: true }).catch(() => {});
+        continue;
+      }
+      errors.push(`${converter.name}: 未生成 JPG 文件`);
+    } catch (error) {
+      const stderr = error?.stderr ? String(error.stderr).trim() : '';
+      errors.push(`${converter.name}: ${stderr || error?.message || '转换失败'}`);
+    }
+  }
+
+  throw new Error(`图片转 JPG 失败。服务器需要安装 ffmpeg 或 ImageMagick。已尝试：\n${errors.join('\n')}`);
+}
+
 async function createMysqlConnection() {
   const mysqlConfig = await readMysqlConfig();
   return mysql.createConnection({
@@ -426,10 +578,19 @@ async function ensureUserOptionalColumns(conn) {
 }
 
 async function readMysqlConfig() {
+  const config = await readAppConfig();
+  return config.mysql || {};
+}
+
+async function readAppConfig() {
   const configPath = path.join(ROOT_DIR, 'app_config.json');
   const raw = await fsp.readFile(configPath, 'utf8');
-  const config = JSON.parse(raw);
-  return config.mysql || {};
+  return JSON.parse(raw);
+}
+
+async function writeAppConfig(config) {
+  const configPath = path.join(ROOT_DIR, 'app_config.json');
+  await fsp.writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
 function validateDjdPayload(payload) {
@@ -484,6 +645,7 @@ async function sendGeneratedWebp(res, result) {
     'Content-Type': 'image/webp',
     'Content-Length': stat.size,
     'X-Filename': encodeURIComponent(result.webpName),
+    'X-File-Date': encodeURIComponent(result.fileDate || ''),
     'Content-Disposition': `inline; filename*=UTF-8''${encodeRFC5987ValueChars(result.webpName)}`
   });
   fs.createReadStream(result.imagePath).pipe(res);

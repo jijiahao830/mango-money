@@ -75,6 +75,15 @@
           <button
             v-if="isAdministrator"
             class="nav-button"
+            :class="{ active: activePage === 'push' }"
+            type="button"
+            @click="activePage = 'push'"
+          >
+            推送
+          </button>
+          <button
+            v-if="isAdministrator"
+            class="nav-button"
             :class="{ active: activePage === 'accounts' }"
             type="button"
             @click="activePage = 'accounts'"
@@ -402,6 +411,32 @@
         <p v-if="accountErrorText" class="error-text">{{ accountErrorText }}</p>
       </section>
 
+      <section v-else-if="activePage === 'push'" class="account-page">
+        <header class="section-title-row">
+          <div>
+            <h1>推送配置</h1>
+            <p>配置企业微信群机器人 Webhook，生成图片后可直接推送完整图片到群里。</p>
+          </div>
+        </header>
+
+        <section class="card account-create-card">
+          <h2>企业微信机器人</h2>
+          <form class="receipt-form" @submit.prevent="savePushConfig">
+            <label>
+              <span>Webhook 地址</span>
+              <input
+                v-model="pushConfig.webhook"
+                placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+              />
+            </label>
+            <button type="submit" :disabled="isPushConfigLoading">保存配置</button>
+          </form>
+        </section>
+
+        <p v-if="pushConfigStatusText" class="status-text">{{ pushConfigStatusText }}</p>
+        <p v-if="pushConfigErrorText" class="error-text">{{ pushConfigErrorText }}</p>
+      </section>
+
       <section v-else class="workspace-page"></section>
     </section>
   </main>
@@ -430,6 +465,9 @@
       </div>
 
       <footer class="modal-footer">
+        <button class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
+          {{ isPushLoading ? '推送中' : '推送' }}
+        </button>
         <button class="download-button" type="button" @click="downloadImage">下载图片</button>
       </footer>
     </section>
@@ -487,12 +525,19 @@ const accountForm = reactive({
   password: '',
   permission: 'personnel'
 });
+const pushConfig = reactive({
+  webhook: ''
+});
 const users = ref([]);
 const visiblePasswords = reactive({});
 const newPasswords = reactive({});
 const isAccountLoading = ref(false);
 const accountStatusText = ref('');
 const accountErrorText = ref('');
+const isPushConfigLoading = ref(false);
+const isPushLoading = ref(false);
+const pushConfigStatusText = ref('');
+const pushConfigErrorText = ref('');
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -511,7 +556,9 @@ let previewObjectUrl = '';
 const result = reactive({
   imageUrl: '',
   webpName: '',
+  fileDate: '',
   recordSaved: false,
+  pushed: false,
   type: 'deposit'
 });
 
@@ -561,6 +608,14 @@ watch(activePage, (value) => {
       return;
     }
     loadUsers();
+  }
+
+  if (value === 'push') {
+    if (!isAdministrator.value) {
+      activePage.value = 'home';
+      return;
+    }
+    loadPushConfig();
   }
 });
 
@@ -756,7 +811,9 @@ async function renderWithSkill(url, loadingText, payload, type, formElement) {
     previewObjectUrl = URL.createObjectURL(blob);
     result.imageUrl = previewObjectUrl;
     result.webpName = getFilenameFromResponse(response) || `${type}.webp`;
+    result.fileDate = getHeaderValue(response, 'X-File-Date');
     result.recordSaved = false;
+    result.pushed = false;
     result.type = type;
     finishProgress();
     statusText.value = '已生成';
@@ -808,6 +865,75 @@ async function downloadImage() {
     link.remove();
   } catch {
     errorText.value = '下载图片失败，请重新生成后再试';
+  }
+}
+
+async function loadPushConfig() {
+  pushConfigErrorText.value = '';
+  pushConfigStatusText.value = '';
+  isPushConfigLoading.value = true;
+
+  try {
+    const response = await fetch('/api/push-config');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取推送配置失败');
+    pushConfig.webhook = data.webhook || '';
+  } catch (error) {
+    pushConfigErrorText.value = error?.message || String(error);
+  } finally {
+    isPushConfigLoading.value = false;
+  }
+}
+
+async function savePushConfig() {
+  pushConfigErrorText.value = '';
+  pushConfigStatusText.value = '';
+  isPushConfigLoading.value = true;
+
+  try {
+    const response = await fetch('/api/push-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pushConfig)
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '保存推送配置失败');
+    pushConfigStatusText.value = '推送配置已保存';
+  } catch (error) {
+    pushConfigErrorText.value = error?.message || String(error);
+  } finally {
+    isPushConfigLoading.value = false;
+  }
+}
+
+async function pushCurrentImage() {
+  if (!result.webpName || !result.fileDate) {
+    errorText.value = '请先生成图片后再推送';
+    return;
+  }
+
+  isPushLoading.value = true;
+  errorText.value = '';
+  statusText.value = '正在推送图片...';
+
+  try {
+    const response = await fetch('/api/push-wecom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fileName: result.webpName,
+        fileDate: result.fileDate
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '推送失败');
+    result.pushed = true;
+    statusText.value = '已推送到企业微信群';
+  } catch (error) {
+    errorText.value = error?.message || String(error);
+    statusText.value = '';
+  } finally {
+    isPushLoading.value = false;
   }
 }
 
@@ -926,6 +1052,9 @@ function clearAccountState() {
   accountForm.permission = 'personnel';
   accountStatusText.value = '';
   accountErrorText.value = '';
+  pushConfig.webhook = '';
+  pushConfigStatusText.value = '';
+  pushConfigErrorText.value = '';
   for (const key of Object.keys(visiblePasswords)) delete visiblePasswords[key];
   for (const key of Object.keys(newPasswords)) delete newPasswords[key];
 }
@@ -964,6 +1093,11 @@ async function saveWkdRecord() {
 
 function getFilenameFromResponse(response) {
   const raw = response.headers.get('X-Filename');
+  return raw ? decodeURIComponent(raw) : '';
+}
+
+function getHeaderValue(response, name) {
+  const raw = response.headers.get(name);
   return raw ? decodeURIComponent(raw) : '';
 }
 
@@ -1011,7 +1145,9 @@ function clearForm() {
   revokePreviewObjectUrl();
   result.imageUrl = '';
   result.webpName = '';
+  result.fileDate = '';
   result.recordSaved = false;
+  result.pushed = false;
   result.type = 'deposit';
   statusText.value = '';
   errorText.value = '';
@@ -1040,7 +1176,9 @@ function clearBalanceForm() {
   revokePreviewObjectUrl();
   result.imageUrl = '';
   result.webpName = '';
+  result.fileDate = '';
   result.recordSaved = false;
+  result.pushed = false;
   result.type = 'balance';
   statusText.value = '';
   errorText.value = '';
