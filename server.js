@@ -169,6 +169,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/history-image') {
+      await serveHistoryImage(url, res);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname.startsWith('/skill-output/')) {
       await serveSkillOutput(url.pathname, res);
       return;
@@ -479,8 +484,7 @@ async function listHistoryImages() {
             if (seen.has(dedupeKey)) continue;
             seen.add(dedupeKey);
 
-            const relativePath = path.relative(CREATE_FILE_ROOT, filePath).split(path.sep).join('/');
-            const apiUrl = `/api/create-file/${relativePath.split('/').map(encodeURIComponent).join('/')}`;
+            const apiUrl = `/api/history-image?type=${encodeURIComponent(type)}&date=${encodeURIComponent(date)}&name=${encodeURIComponent(fileEntry.name)}`;
             items.push({
               type,
               label,
@@ -1290,6 +1294,35 @@ async function serveCreateFile(pathname, res) {
   }
 
   await sendFile(filePath, res);
+}
+
+async function serveHistoryImage(url, res) {
+  const type = String(url.searchParams.get('type') || '').trim();
+  const date = String(url.searchParams.get('date') || '').trim();
+  const name = String(url.searchParams.get('name') || '').trim();
+
+  if (!RECEIPT_DIR_NAMES[type] || !date || !name) {
+    sendText(res, 'Not found', 404);
+    return;
+  }
+
+  const candidates = [
+    path.join(CREATE_FILE_ROOT, RECEIPT_DIR_NAMES[type], date, name),
+    path.join(CREATE_FILE_ROOT, LEGACY_RECEIPT_DIR_NAMES[type] || '', date, name)
+  ];
+
+  for (const candidate of candidates) {
+    const filePath = path.normalize(candidate);
+    const relative = path.relative(CREATE_FILE_ROOT, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) continue;
+    const stat = await fsp.stat(filePath).catch(() => null);
+    if (stat?.isFile()) {
+      await sendFile(filePath, res);
+      return;
+    }
+  }
+
+  sendText(res, 'Not found', 404);
 }
 
 async function resolveExistingCreateFile(relative) {
