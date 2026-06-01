@@ -27,7 +27,7 @@ if [ ! -f app_config.json ]; then
   exit 1
 fi
 
-mkdir -p create_file
+mkdir -p create_file/djd create_file/wkd create_file/dzd create_file/_tmp
 
 detect_chrome_path() {
   if [ -n "${CHROME_PATH:-}" ] && [ -x "$CHROME_PATH" ]; then

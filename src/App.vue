@@ -106,7 +106,45 @@
         </div>
       </nav>
 
-      <section v-if="activePage === 'home'" class="workspace-page"></section>
+      <section v-if="activePage === 'home'" class="workspace-page">
+        <div v-if="isAdministrator" class="account-page">
+          <header class="section-title-row">
+            <div>
+              <h1>系统健康</h1>
+              <p>检查当前财务中台运行环境和核心配置。</p>
+            </div>
+            <button class="secondary refresh-button" type="button" :disabled="isHealthLoading" @click="loadHealthStatus">
+              刷新
+            </button>
+          </header>
+
+          <section class="card account-create-card">
+            <div v-if="isHealthLoading" class="empty-text">正在检查系统状态...</div>
+            <div v-else-if="healthStatus" class="health-panel">
+              <div class="health-summary">
+                <span class="health-dot" :class="{ ok: healthStatus.ok, bad: !healthStatus.ok }"></span>
+                <strong>{{ healthStatus.ok ? '系统正常' : '系统存在异常' }}</strong>
+                <span>{{ healthStatus.service }} · {{ healthStatus.host }}:{{ healthStatus.port }}</span>
+              </div>
+
+              <div class="health-grid">
+                <article v-for="item in healthItems" :key="item.key" class="health-item">
+                  <div>
+                    <strong>{{ item.label }}</strong>
+                    <span>{{ item.detail }}</span>
+                  </div>
+                  <span class="health-status" :class="{ ok: item.ok, warn: item.warn, bad: !item.ok && !item.warn }">
+                    {{ item.status }}
+                  </span>
+                </article>
+              </div>
+            </div>
+            <p v-else class="empty-text">暂无健康检查结果</p>
+          </section>
+
+          <p v-if="healthErrorText" class="error-text">{{ healthErrorText }}</p>
+        </div>
+      </section>
 
       <section v-else-if="activePage === 'deposit'" class="card form-card">
         <header class="page-header compact">
@@ -879,6 +917,9 @@ const isHistoryLoading = ref(false);
 const historyErrorText = ref('');
 const historyDateFilters = reactive({});
 const historyOpenDates = reactive({});
+const healthStatus = ref(null);
+const isHealthLoading = ref(false);
+const healthErrorText = ref('');
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -916,6 +957,59 @@ const progressLogoStyle = computed(() => ({
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
 
+const healthItems = computed(() => {
+  const checks = healthStatus.value?.checks || {};
+  const items = [];
+
+  const addItem = (key, label, check, detail = '') => {
+    if (!check) return;
+    items.push({
+      key,
+      label,
+      ok: check.ok !== false,
+      warn: false,
+      status: check.ok === false ? '异常' : '正常',
+      detail
+    });
+  };
+
+  addItem('build', '前端构建', checks.build, checks.build?.path || 'build');
+  addItem('appConfig', '配置文件', checks.appConfig, 'app_config.json');
+  addItem(
+    'mysqlConfig',
+    'MySQL 配置',
+    checks.mysqlConfig,
+    checks.mysqlConfig?.database
+      ? `${checks.mysqlConfig.host}:${checks.mysqlConfig.port} / ${checks.mysqlConfig.database}`
+      : '未读取到数据库配置'
+  );
+
+  if (checks.wecomConfig) {
+    items.push({
+      key: 'wecomConfig',
+      label: '企业微信推送',
+      ok: true,
+      warn: !checks.wecomConfig.configured,
+      status: checks.wecomConfig.configured ? '已配置' : '未配置',
+      detail: checks.wecomConfig.configured ? 'Webhook 已配置' : '不影响基础功能，可在推送页面配置'
+    });
+  }
+
+  for (const [type, check] of Object.entries(checks.skills || {})) {
+    addItem(`skill-${type}`, `${receiptTypeLabel(type)} Skill`, check, check.file || '');
+  }
+
+  for (const [type, check] of Object.entries(checks.createFileDirs || {})) {
+    addItem(`dir-${type}`, `${receiptTypeLabel(type)}目录`, check, check.path || '');
+  }
+
+  addItem('runtime', '运行缓存目录', checks.runtime, checks.runtime?.path || '.runtime');
+  addItem('chrome', 'Chrome/Chromium', checks.chrome, checks.chrome?.ok ? '可用于图片渲染' : '未检测到可执行浏览器');
+  addItem('webpConverter', 'WebP 转换工具', checks.webpConverter, checks.webpConverter?.ok ? 'cwebp 可用' : '未检测到 cwebp');
+
+  return items;
+});
+
 const previewTitle = computed(() => {
   if (result.type === 'balance') return '尾款单预览';
   if (result.type === 'statement') return '对帐单预览';
@@ -949,6 +1043,10 @@ watch(balanceReceivedAt, (value) => {
 });
 
 watch(activePage, (value) => {
+  if (value === 'home' && isAdministrator.value) {
+    loadHealthStatus();
+  }
+
   if (value === 'accounts') {
     if (!isAdministrator.value) {
       activePage.value = 'home';
@@ -967,6 +1065,15 @@ watch(activePage, (value) => {
 
   if (value === 'history') {
     loadHistoryImages();
+  }
+});
+
+watch(currentUser, (value) => {
+  if (value?.permission === 'administrator' && activePage.value === 'home') {
+    loadHealthStatus();
+  } else {
+    healthStatus.value = null;
+    healthErrorText.value = '';
   }
 });
 
@@ -1262,6 +1369,26 @@ async function savePushConfig() {
     pushConfigErrorText.value = error?.message || String(error);
   } finally {
     isPushConfigLoading.value = false;
+  }
+}
+
+async function loadHealthStatus() {
+  if (!isAdministrator.value) return;
+
+  healthErrorText.value = '';
+  isHealthLoading.value = true;
+
+  try {
+    const response = await fetch('/api/health');
+    const data = await response.json();
+    healthStatus.value = data;
+    if (!response.ok) {
+      throw new Error(data.error || '系统健康检查发现异常');
+    }
+  } catch (error) {
+    healthErrorText.value = error?.message || String(error);
+  } finally {
+    isHealthLoading.value = false;
   }
 }
 
@@ -1679,5 +1806,11 @@ function formatFileSize(size) {
 
 function permissionLabel(permission) {
   return permission === 'administrator' ? '管理员' : '工作人员';
+}
+
+function receiptTypeLabel(type) {
+  if (type === 'balance') return '尾款单';
+  if (type === 'statement') return '对帐单';
+  return '定金单';
 }
 </script>

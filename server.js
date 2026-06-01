@@ -66,6 +66,12 @@ const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      const result = await getHealthStatus();
+      sendJson(res, result, result.ok ? 200 : 500);
+      return;
+    }
+
     if (req.method === 'POST' && (url.pathname === '/api/preview' || url.pathname === '/api/generate')) {
       const payload = await readJsonBody(req);
       const result = await renderReceipt(payload, 'deposit');
@@ -199,6 +205,8 @@ const server = http.createServer(async (req, res) => {
     sendJson(res, { error: error?.message || String(error) }, error?.statusCode || 500);
   }
 });
+
+await ensureAppDirs();
 
 server.listen(PORT, HOST, () => {
   console.log(`Mango Money is running at http://localhost:${PORT}`);
@@ -876,6 +884,121 @@ async function ensureStatementTable(conn) {
 async function readMysqlConfig() {
   const config = await readAppConfig();
   return config.mysql || {};
+}
+
+async function ensureAppDirs() {
+  await fsp.mkdir(RUNTIME_DIR, { recursive: true });
+  await fsp.mkdir(path.join(CREATE_FILE_ROOT, '_tmp'), { recursive: true });
+  await Promise.all(
+    Object.values(RECEIPT_DIR_NAMES).map(dirName =>
+      fsp.mkdir(path.join(CREATE_FILE_ROOT, dirName), { recursive: true })
+    )
+  );
+}
+
+async function getHealthStatus() {
+  const checks = {};
+
+  checks.build = {
+    ok: fs.existsSync(path.join(DIST_DIR, 'index.html')),
+    path: path.relative(ROOT_DIR, DIST_DIR)
+  };
+
+  checks.appConfig = {
+    ok: fs.existsSync(path.join(ROOT_DIR, 'app_config.json'))
+  };
+
+  try {
+    const config = await readAppConfig();
+    const mysqlConfig = config.mysql || {};
+    checks.mysqlConfig = {
+      ok: Boolean(mysqlConfig.host && mysqlConfig.database && mysqlConfig.user),
+      host: mysqlConfig.host || '',
+      port: mysqlConfig.port || 3306,
+      database: mysqlConfig.database || ''
+    };
+    checks.wecomConfig = {
+      ok: true,
+      configured: Boolean(config.wecom?.webhook)
+    };
+  } catch (error) {
+    checks.mysqlConfig = { ok: false, error: error?.message || String(error) };
+    checks.wecomConfig = { ok: true, configured: false };
+  }
+
+  checks.skills = Object.fromEntries(
+    Object.entries(SKILLS).map(([type, skill]) => [
+      type,
+      {
+        ok: fs.existsSync(skill.file),
+        file: path.relative(ROOT_DIR, skill.file)
+      }
+    ])
+  );
+
+  checks.createFileDirs = Object.fromEntries(
+    Object.entries(RECEIPT_DIR_NAMES).map(([type, dirName]) => {
+      const dirPath = path.join(CREATE_FILE_ROOT, dirName);
+      return [
+        type,
+        {
+          ok: fs.existsSync(dirPath),
+          path: path.relative(ROOT_DIR, dirPath)
+        }
+      ];
+    })
+  );
+
+  checks.runtime = {
+    ok: fs.existsSync(RUNTIME_DIR),
+    path: path.relative(ROOT_DIR, RUNTIME_DIR)
+  };
+
+  checks.chrome = {
+    ok: Boolean(findExecutable(process.env.CHROME_PATH, [
+      '/snap/bin/chromium',
+      '/usr/bin/chromium',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    ]))
+  };
+
+  checks.webpConverter = {
+    ok: Boolean(findExecutable(process.env.CWEBP_PATH, [
+      '/usr/bin/cwebp',
+      '/usr/local/bin/cwebp',
+      '/opt/homebrew/bin/cwebp'
+    ]))
+  };
+
+  const ok = Object.values(checks).every(check => {
+    if (check && typeof check === 'object' && 'ok' in check) return check.ok;
+    if (check && typeof check === 'object') {
+      return Object.values(check).every(item => !item || typeof item !== 'object' || item.ok !== false);
+    }
+    return true;
+  });
+
+  return {
+    ok,
+    service: 'mango-money',
+    port: PORT,
+    host: HOST,
+    checks
+  };
+}
+
+function findExecutable(preferred, candidates) {
+  const allCandidates = [preferred, ...candidates].filter(Boolean);
+  for (const candidate of allCandidates) {
+    try {
+      execFileSync('test', ['-x', candidate], { stdio: 'ignore' });
+      return candidate;
+    } catch {}
+  }
+  return '';
 }
 
 async function readAppConfig() {
