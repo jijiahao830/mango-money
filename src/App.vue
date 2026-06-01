@@ -425,21 +425,21 @@
               <label><span>车牌</span><input v-model="statementForm.plateNumber" /></label>
             </div>
             <div class="row">
-              <label><span>出车时间</span><input v-model="statementForm.startAt" /></label>
-              <label><span>回车时间</span><input v-model="statementForm.returnAt" /></label>
+              <label><span>出车时间</span><input v-model="statementForm.startAt" type="datetime-local" /></label>
+              <label><span>回车时间</span><input v-model="statementForm.returnAt" type="datetime-local" /></label>
             </div>
             <div class="row">
-              <label><span>用车天数</span><input v-model="statementForm.useDays" /></label>
-              <label><span>出车公里</span><input v-model="statementForm.startMileage" /></label>
+              <label><span>用车天数（只需要输入数字，系统会自动补充单位：天）</span><input v-model="statementForm.useDays" inputmode="decimal" /></label>
+              <label><span>出车公里（只需要输入数字，系统会自动补充单位：km）</span><input v-model="statementForm.startMileage" inputmode="decimal" /></label>
             </div>
             <div class="row">
-              <label><span>回车公里</span><input v-model="statementForm.returnMileage" /></label>
-              <label><span>实际行驶</span><input v-model="statementForm.actualMileage" /></label>
+              <label><span>回车公里（只需要输入数字，系统会自动补充单位：km）</span><input v-model="statementForm.returnMileage" inputmode="decimal" /></label>
+              <label><span>实际公里（只需要输入数字，系统会自动补充单位：km）</span><input v-model="statementForm.actualMileage" inputmode="decimal" /></label>
             </div>
             <div class="row">
-              <label><span>出车油量</span><input v-model="statementForm.startFuel" /></label>
-              <label><span>回车油量</span><input v-model="statementForm.returnFuel" /></label>
-              <label><span>补油量</span><input v-model="statementForm.refuelAmount" /></label>
+              <label><span>出车油量（只需要输入数字，系统会自动补充单位：%）</span><input v-model="statementForm.startFuel" inputmode="decimal" /></label>
+              <label><span>回车油量（只需要输入数字，系统会自动补充单位：%）</span><input v-model="statementForm.returnFuel" inputmode="decimal" /></label>
+              <label><span>补油量（只需要输入数字，系统会自动补充单位：%）</span><input v-model="statementForm.refuelAmount" inputmode="decimal" /></label>
             </div>
           </div>
 
