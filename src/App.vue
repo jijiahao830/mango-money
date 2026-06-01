@@ -73,6 +73,14 @@
             对帐单
           </button>
           <button
+            class="nav-button"
+            :class="{ active: activePage === 'history' }"
+            type="button"
+            @click="activePage = 'history'"
+          >
+            历史图片
+          </button>
+          <button
             v-if="isAdministrator"
             class="nav-button"
             :class="{ active: activePage === 'push' }"
@@ -520,6 +528,51 @@
         <p v-if="errorText" class="error-text">{{ errorText }}</p>
       </section>
 
+      <section v-else-if="activePage === 'history'" class="account-page">
+        <header class="section-title-row">
+          <div>
+            <h1>历史图片</h1>
+            <p>按生成类型查看已保存的图片。</p>
+          </div>
+          <button class="secondary refresh-button" type="button" :disabled="isHistoryLoading" @click="loadHistoryImages">
+            刷新
+          </button>
+        </header>
+
+        <div v-if="isHistoryLoading" class="card account-create-card">
+          <p class="empty-text">正在读取历史图片...</p>
+        </div>
+
+        <div v-else class="history-groups">
+          <section v-for="group in historyGroups" :key="group.type" class="card history-group">
+            <header class="history-group-header">
+              <h2>{{ group.label }}</h2>
+              <span class="count-badge">{{ group.count }} 张</span>
+            </header>
+
+            <div v-if="group.items.length" class="history-grid">
+              <article v-for="image in group.items" :key="image.url" class="history-item">
+                <button class="history-thumb" type="button" @click="previewHistoryImage(image)">
+                  <img :src="image.url" :alt="image.name" loading="lazy" />
+                </button>
+                <div class="history-meta">
+                  <strong>{{ image.name }}</strong>
+                  <span>{{ image.date }} · {{ formatFileSize(image.size) }}</span>
+                </div>
+                <div class="history-actions">
+                  <button class="secondary" type="button" @click="previewHistoryImage(image)">预览</button>
+                  <a class="download-link" :href="image.url" :download="image.name">下载</a>
+                </div>
+              </article>
+            </div>
+
+            <p v-else class="empty-text">暂无图片</p>
+          </section>
+        </div>
+
+        <p v-if="historyErrorText" class="error-text">{{ historyErrorText }}</p>
+      </section>
+
       <section v-else-if="activePage === 'accounts'" class="account-page">
         <header class="section-title-row">
           <div>
@@ -668,7 +721,7 @@
       </div>
 
       <footer class="modal-footer">
-        <button class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
+        <button v-if="!result.history" class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
           {{ isPushLoading ? '推送中' : '推送' }}
         </button>
         <button class="download-button" type="button" @click="downloadImage">下载图片</button>
@@ -796,6 +849,9 @@ const isPushConfigLoading = ref(false);
 const isPushLoading = ref(false);
 const pushConfigStatusText = ref('');
 const pushConfigErrorText = ref('');
+const historyGroups = ref([]);
+const isHistoryLoading = ref(false);
+const historyErrorText = ref('');
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -818,6 +874,7 @@ const result = reactive({
   fileDate: '',
   recordSaved: false,
   pushed: false,
+  history: false,
   type: 'deposit'
 });
 
@@ -879,6 +936,10 @@ watch(activePage, (value) => {
       return;
     }
     loadPushConfig();
+  }
+
+  if (value === 'history') {
+    loadHistoryImages();
   }
 });
 
@@ -1083,6 +1144,7 @@ async function renderWithSkill(url, loadingText, payload, type, formElement) {
     result.fileDate = getHeaderValue(response, 'X-File-Date');
     result.recordSaved = false;
     result.pushed = false;
+    result.history = false;
     result.type = type;
     finishProgress();
     statusText.value = '已生成';
@@ -1117,12 +1179,14 @@ async function downloadImage() {
   if (!result.imageUrl) return;
 
   try {
-    if (result.type === 'statement') {
-      await saveZdRecord();
-    } else if (result.type === 'balance') {
-      await saveWkdRecord();
-    } else {
-      await saveDjdRecord();
+    if (!result.history) {
+      if (result.type === 'statement') {
+        await saveZdRecord();
+      } else if (result.type === 'balance') {
+        await saveWkdRecord();
+      } else {
+        await saveDjdRecord();
+      }
     }
 
     const link = document.createElement('a');
@@ -1172,6 +1236,37 @@ async function savePushConfig() {
   } finally {
     isPushConfigLoading.value = false;
   }
+}
+
+async function loadHistoryImages() {
+  historyErrorText.value = '';
+  isHistoryLoading.value = true;
+
+  try {
+    const response = await fetch('/api/history-images');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取历史图片失败');
+    historyGroups.value = data.groups || [];
+  } catch (error) {
+    historyErrorText.value = error?.message || String(error);
+  } finally {
+    isHistoryLoading.value = false;
+  }
+}
+
+function previewHistoryImage(image) {
+  revokePreviewObjectUrl();
+  result.imageUrl = image.url;
+  result.webpName = image.name;
+  result.fileDate = `${image.label}/${image.date}`;
+  result.recordSaved = true;
+  result.pushed = false;
+  result.history = true;
+  result.type = image.type;
+  statusText.value = '';
+  errorText.value = '';
+  resetView();
+  isPreviewOpen.value = true;
 }
 
 async function pushCurrentImage() {
@@ -1440,6 +1535,7 @@ function clearForm() {
   result.fileDate = '';
   result.recordSaved = false;
   result.pushed = false;
+  result.history = false;
   result.type = 'deposit';
   statusText.value = '';
   errorText.value = '';
@@ -1471,6 +1567,7 @@ function clearBalanceForm() {
   result.fileDate = '';
   result.recordSaved = false;
   result.pushed = false;
+  result.history = false;
   result.type = 'balance';
   statusText.value = '';
   errorText.value = '';
@@ -1490,6 +1587,7 @@ function clearStatementForm() {
   result.fileDate = '';
   result.recordSaved = false;
   result.pushed = false;
+  result.history = false;
   result.type = 'statement';
   statusText.value = '';
   errorText.value = '';
@@ -1513,6 +1611,13 @@ function formatDisplayDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatFileSize(size) {
+  const value = Number(size || 0);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
 }
 
 function permissionLabel(permission) {

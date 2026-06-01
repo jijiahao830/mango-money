@@ -35,6 +35,11 @@ const SKILLS = {
 };
 const OUTPUT_ROOT = RUNTIME_DIR;
 const CREATE_FILE_ROOT = path.join(ROOT_DIR, 'create_file');
+const RECEIPT_DIR_NAMES = {
+  deposit: '定金单',
+  balance: '尾款单',
+  statement: '对帐单'
+};
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -148,6 +153,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/history-images') {
+      const result = await listHistoryImages();
+      sendJson(res, result);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname.startsWith('/skill-output/')) {
       await serveSkillOutput(url.pathname, res);
       return;
@@ -195,13 +206,13 @@ async function renderReceipt(payload, type = 'deposit') {
     throw new Error(`Skill rendered but output paths were not found.\n${output}`);
   }
 
-  const archivedWebpPath = await archiveGeneratedWebp(webpPath);
+  const archivedWebpPath = await archiveGeneratedWebp(webpPath, type);
   if (pdfPath) await fsp.rm(pdfPath, { force: true });
 
   return {
     imagePath: archivedWebpPath,
     webpName: path.basename(archivedWebpPath),
-    fileDate: path.basename(path.dirname(archivedWebpPath))
+    fileDate: path.relative(CREATE_FILE_ROOT, path.dirname(archivedWebpPath)).split(path.sep).join('/')
   };
 }
 
@@ -421,13 +432,55 @@ async function saveZdRecord(payload) {
     ].map(value => value === undefined || value === null ? '' : String(value));
 
     const [result] = await conn.execute(
-      `INSERT INTO cw_zd (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
+      `INSERT INTO cw_dzd (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
       values
     );
     return { ok: true, id: result.insertId };
   } finally {
     await conn.end();
   }
+}
+
+async function listHistoryImages() {
+  const groups = await Promise.all(
+    Object.entries(RECEIPT_DIR_NAMES).map(async ([type, label]) => {
+      const typeDir = path.join(CREATE_FILE_ROOT, label);
+      const dates = await fsp.readdir(typeDir, { withFileTypes: true }).catch(() => []);
+      const items = [];
+
+      for (const dateEntry of dates) {
+        if (!dateEntry.isDirectory()) continue;
+        const date = dateEntry.name;
+        const dateDir = path.join(typeDir, date);
+        const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
+
+        for (const fileEntry of files) {
+          if (!fileEntry.isFile() || path.extname(fileEntry.name).toLowerCase() !== '.webp') continue;
+          const filePath = path.join(dateDir, fileEntry.name);
+          const stat = await fsp.stat(filePath).catch(() => null);
+          if (!stat?.isFile()) continue;
+
+          const relativeParts = [label, date, fileEntry.name].map(encodeURIComponent);
+          items.push({
+            type,
+            label,
+            date,
+            name: fileEntry.name,
+            size: stat.size,
+            createdAt: stat.birthtime || stat.mtime,
+            modifiedAt: stat.mtime,
+            url: `/create-file/${relativeParts.join('/')}`,
+            apiUrl: `/api/create-file/${relativeParts.join('/')}`
+          });
+        }
+      }
+
+      items.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+      return { type, label, count: items.length, items };
+    })
+  );
+
+  return { ok: true, groups };
 }
 
 async function loginUser(payload) {
@@ -725,7 +778,7 @@ async function ensureUserOptionalColumns(conn) {
 }
 
 async function ensureStatementTable(conn) {
-  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_zd (
+  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_dzd (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     create_user VARCHAR(100) NOT NULL DEFAULT '' COMMENT '创建人员',
@@ -855,12 +908,14 @@ async function sendGeneratedWebp(res, result) {
   fs.createReadStream(result.imagePath).pipe(res);
 }
 
-async function archiveGeneratedWebp(webpPath) {
+async function archiveGeneratedWebp(webpPath, type = 'deposit') {
   const day = formatLocalDate(new Date());
-  const dayDir = path.join(CREATE_FILE_ROOT, day);
+  const typeDir = RECEIPT_DIR_NAMES[type] || type;
+  const dayDir = path.join(CREATE_FILE_ROOT, typeDir, day);
   await fsp.mkdir(dayDir, { recursive: true });
 
-  const targetPath = await getAvailableFilePath(dayDir, path.basename(webpPath));
+  const originalName = path.basename(webpPath);
+  const targetPath = await getAvailableFilePath(dayDir, originalName);
   await fsp.copyFile(webpPath, targetPath);
   return targetPath;
 }
@@ -1018,7 +1073,7 @@ async function patchSkillChromeLookup(skill) {
   );
   source = source.replace(
     "const baseName = sanitizeFilename(`定金单_${data.customerId}_${data.customerName}_${data.carModel}_${String(data.holdUntil).slice(0,10)}`);",
-    "if (!data.orderId || String(data.orderId).trim() === '') die('orderId（订单编号）不能为空');\n  const baseName = sanitizeFilename(`${data.orderId}_${String(data.holdUntil).slice(0,10)}`);"
+    "if (!data.orderId || String(data.orderId).trim() === '') die('orderId（订单编号）不能为空');\n  const baseName = sanitizeFilename(`djd_${data.orderId}_${String(data.holdUntil || new Date().toISOString().slice(0,10)).slice(0,10)}`);"
   );
   source = source.replace(
     "const tmpHtml = path.join(os.tmpdir(), `${baseName}_${Date.now()}.html`);\n  const tmpPng = path.join(os.tmpdir(), `${baseName}_${Date.now()}.png`);",
