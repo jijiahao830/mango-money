@@ -688,7 +688,7 @@ async function pushGeneratedImageToWecom(payload) {
   const webhook = String(config.wecom?.webhook || '').trim();
   if (!webhook) throw new Error('请先配置企业微信 Webhook 地址');
 
-  const imagePath = resolveCreateFilePath(fileDate, fileName);
+  const imagePath = await resolveCreateFilePath(fileDate, fileName);
   const stat = await fsp.stat(imagePath).catch(() => null);
   if (!stat || !stat.isFile()) throw new Error('未找到生成的图片文件，请重新生成后再推送');
 
@@ -718,9 +718,11 @@ async function pushGeneratedImageToWecom(payload) {
   }
 }
 
-function resolveCreateFilePath(fileDate, fileName) {
+async function resolveCreateFilePath(fileDate, fileName) {
   const safeDate = decodePathRelative(fileDate);
   const safeName = decodePathRelative(fileName);
+  const existingPath = await resolveExistingCreateFile(path.join(safeDate, safeName));
+  if (existingPath) return existingPath;
   return resolveCreateFileCandidate(path.join(safeDate, safeName));
 }
 

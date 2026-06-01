@@ -746,7 +746,7 @@
       </div>
 
       <footer class="modal-footer">
-        <button v-if="!result.history" class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
+        <button class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
           {{ isPushLoading ? '推送中' : '推送' }}
         </button>
         <button class="download-button" type="button" @click="downloadImage">下载图片</button>
@@ -1276,9 +1276,7 @@ async function loadHistoryImages() {
     historyGroups.value = data.groups || [];
     for (const group of historyGroups.value) {
       if (!historyDateFilters[group.type]) historyDateFilters[group.type] = '';
-      if (!historyOpenDates[group.type] && group.dateGroups?.[0]) {
-        historyOpenDates[group.type] = group.dateGroups[0].date;
-      }
+      historyOpenDates[group.type] = '';
     }
   } catch (error) {
     historyErrorText.value = error?.message || String(error);
@@ -1337,12 +1335,14 @@ async function pushCurrentImage() {
   statusText.value = '正在推送图片...';
 
   try {
-    if (result.type === 'statement') {
-      await saveZdRecord();
-    } else if (result.type === 'balance') {
-      await saveWkdRecord();
-    } else {
-      await saveDjdRecord();
+    if (!result.history) {
+      if (result.type === 'statement') {
+        await saveZdRecord();
+      } else if (result.type === 'balance') {
+        await saveWkdRecord();
+      } else {
+        await saveDjdRecord();
+      }
     }
 
     const response = await fetch('/api/push-wecom', {
