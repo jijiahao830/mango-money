@@ -507,15 +507,46 @@ hr {
   margin-bottom: 14px;
 }
 
+.history-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
 .history-group-header h2 {
   margin: 0;
   font-size: 18px;
+}
+
+.history-date-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+}
+
+.history-date-picker span {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.history-date-picker input {
+  width: 148px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  font-size: 13px;
 }
 
 .history-date-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .history-date-group {

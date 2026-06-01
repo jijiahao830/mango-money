@@ -36,6 +36,16 @@ const SKILLS = {
 const OUTPUT_ROOT = RUNTIME_DIR;
 const CREATE_FILE_ROOT = path.join(ROOT_DIR, 'create_file');
 const RECEIPT_DIR_NAMES = {
+  deposit: 'djd',
+  balance: 'wkd',
+  statement: 'dzd'
+};
+const RECEIPT_LABELS = {
+  deposit: '定金单',
+  balance: '尾款单',
+  statement: '对帐单'
+};
+const LEGACY_RECEIPT_DIR_NAMES = {
   deposit: '定金单',
   balance: '尾款单',
   statement: '对帐单'
@@ -443,36 +453,46 @@ async function saveZdRecord(payload) {
 
 async function listHistoryImages() {
   const groups = await Promise.all(
-    Object.entries(RECEIPT_DIR_NAMES).map(async ([type, label]) => {
-      const typeDir = path.join(CREATE_FILE_ROOT, label);
-      const dates = await fsp.readdir(typeDir, { withFileTypes: true }).catch(() => []);
+    Object.entries(RECEIPT_DIR_NAMES).map(async ([type, dirName]) => {
+      const label = RECEIPT_LABELS[type] || dirName;
+      const dirNames = [dirName, LEGACY_RECEIPT_DIR_NAMES[type]].filter(Boolean);
       const items = [];
+      const seen = new Set();
 
-      for (const dateEntry of dates) {
-        if (!dateEntry.isDirectory()) continue;
-        const date = dateEntry.name;
-        const dateDir = path.join(typeDir, date);
-        const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
+      for (const currentDirName of dirNames) {
+        const typeDir = path.join(CREATE_FILE_ROOT, currentDirName);
+        const dates = await fsp.readdir(typeDir, { withFileTypes: true }).catch(() => []);
 
-        for (const fileEntry of files) {
-          if (!fileEntry.isFile() || path.extname(fileEntry.name).toLowerCase() !== '.webp') continue;
-          const filePath = path.join(dateDir, fileEntry.name);
-          const stat = await fsp.stat(filePath).catch(() => null);
-          if (!stat?.isFile()) continue;
+        for (const dateEntry of dates) {
+          if (!dateEntry.isDirectory()) continue;
+          const date = dateEntry.name;
+          const dateDir = path.join(typeDir, date);
+          const files = await fsp.readdir(dateDir, { withFileTypes: true }).catch(() => []);
 
-          const relativeParts = [label, date, fileEntry.name].map(encodeURIComponent);
-          const apiUrl = `/api/create-file/${relativeParts.join('/')}`;
-          items.push({
-            type,
-            label,
-            date,
-            name: fileEntry.name,
-            size: stat.size,
-            createdAt: stat.birthtime || stat.mtime,
-            modifiedAt: stat.mtime,
-            url: apiUrl,
-            apiUrl
-          });
+          for (const fileEntry of files) {
+            if (!fileEntry.isFile() || path.extname(fileEntry.name).toLowerCase() !== '.webp') continue;
+            const filePath = path.join(dateDir, fileEntry.name);
+            const stat = await fsp.stat(filePath).catch(() => null);
+            if (!stat?.isFile()) continue;
+
+            const dedupeKey = `${date}/${fileEntry.name}`;
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
+
+            const relativePath = path.relative(CREATE_FILE_ROOT, filePath).split(path.sep).join('/');
+            const apiUrl = `/api/create-file/${relativePath.split('/').map(encodeURIComponent).join('/')}`;
+            items.push({
+              type,
+              label,
+              date,
+              name: fileEntry.name,
+              size: stat.size,
+              createdAt: stat.birthtime || stat.mtime,
+              modifiedAt: stat.mtime,
+              url: apiUrl,
+              apiUrl
+            });
+          }
         }
       }
 
@@ -697,12 +717,7 @@ async function pushGeneratedImageToWecom(payload) {
 function resolveCreateFilePath(fileDate, fileName) {
   const safeDate = decodePathRelative(fileDate);
   const safeName = decodePathRelative(fileName);
-  const filePath = path.normalize(path.join(CREATE_FILE_ROOT, safeDate, safeName));
-  const relative = path.relative(CREATE_FILE_ROOT, filePath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error('图片路径无效');
-  }
-  return filePath;
+  return resolveCreateFileCandidate(path.join(safeDate, safeName));
 }
 
 async function convertWebpToJpg(inputPath) {
@@ -1261,14 +1276,66 @@ async function serveSkillOutput(pathname, res) {
 
 async function serveCreateFile(pathname, res) {
   const relative = decodePathRelative(pathname.replace(/^\/create-file\/?/, ''));
-  const filePath = path.normalize(path.join(CREATE_FILE_ROOT, relative));
+  const filePath = await resolveExistingCreateFile(relative);
 
-  if (!filePath.startsWith(CREATE_FILE_ROOT)) {
+  if (!filePath) {
+    sendText(res, 'Not found', 404);
+    return;
+  }
+
+  const safeRelative = path.relative(CREATE_FILE_ROOT, filePath);
+  if (safeRelative.startsWith('..') || path.isAbsolute(safeRelative)) {
     sendText(res, 'Forbidden', 403);
     return;
   }
 
   await sendFile(filePath, res);
+}
+
+async function resolveExistingCreateFile(relative) {
+  const candidates = getCreateFileCandidates(relative);
+  for (const candidate of candidates) {
+    const stat = await fsp.stat(candidate).catch(() => null);
+    if (stat?.isFile()) return candidate;
+  }
+  return '';
+}
+
+function resolveCreateFileCandidate(relative) {
+  const candidates = getCreateFileCandidates(relative);
+  if (!candidates.length) throw new Error('图片路径无效');
+  return candidates[0];
+}
+
+function getCreateFileCandidates(relative) {
+  const cleanRelative = path.normalize(relative);
+  const direct = path.normalize(path.join(CREATE_FILE_ROOT, cleanRelative));
+  const safeRelative = path.relative(CREATE_FILE_ROOT, direct);
+  if (safeRelative.startsWith('..') || path.isAbsolute(safeRelative)) return [];
+
+  const parts = cleanRelative.split(path.sep).filter(Boolean);
+  const candidates = [direct];
+
+  if (parts.length === 3) {
+    const [typeDir, date, fileName] = parts;
+    const legacyTypeDir = Object.entries(RECEIPT_DIR_NAMES).find(([, value]) => value === typeDir)?.[0];
+    if (legacyTypeDir && LEGACY_RECEIPT_DIR_NAMES[legacyTypeDir]) {
+      candidates.push(path.join(CREATE_FILE_ROOT, LEGACY_RECEIPT_DIR_NAMES[legacyTypeDir], date, fileName));
+    }
+    const newTypeDir = Object.entries(LEGACY_RECEIPT_DIR_NAMES).find(([, value]) => value === typeDir)?.[0];
+    if (newTypeDir && RECEIPT_DIR_NAMES[newTypeDir]) {
+      candidates.push(path.join(CREATE_FILE_ROOT, RECEIPT_DIR_NAMES[newTypeDir], date, fileName));
+    }
+  }
+
+  if (parts.length === 2) {
+    const [date, fileName] = parts;
+    for (const typeDir of [...Object.values(RECEIPT_DIR_NAMES), ...Object.values(LEGACY_RECEIPT_DIR_NAMES)]) {
+      candidates.push(path.join(CREATE_FILE_ROOT, typeDir, date, fileName));
+    }
+  }
+
+  return candidates;
 }
 
 async function sendFile(filePath, res, headOnly = false) {

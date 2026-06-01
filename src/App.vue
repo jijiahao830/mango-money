@@ -546,12 +546,28 @@
         <div v-else class="history-groups">
           <section v-for="group in historyGroups" :key="group.type" class="card history-group">
             <header class="history-group-header">
-              <h2>{{ group.label }}</h2>
+              <div class="history-title">
+                <h2>{{ group.label }}</h2>
+                <label class="history-date-picker">
+                  <span>选择日期</span>
+                  <input
+                    v-model="historyDateFilters[group.type]"
+                    type="date"
+                    @change="openHistoryDate(group.type)"
+                  />
+                </label>
+              </div>
               <span class="count-badge">{{ group.count }} 张</span>
             </header>
 
-            <div v-if="group.dateGroups?.length" class="history-date-list">
-              <details v-for="dateGroup in group.dateGroups" :key="`${group.type}-${dateGroup.date}`" class="history-date-group">
+            <div v-if="getVisibleHistoryDateGroups(group).length" class="history-date-list">
+              <details
+                v-for="dateGroup in getVisibleHistoryDateGroups(group)"
+                :key="`${group.type}-${dateGroup.date}`"
+                class="history-date-group"
+                :open="isHistoryDateOpen(group.type, dateGroup.date)"
+                @toggle="syncHistoryDateOpen(group.type, dateGroup.date, $event)"
+              >
                 <summary>
                   <span>{{ dateGroup.date }}</span>
                   <strong>{{ dateGroup.count }} 张</strong>
@@ -861,6 +877,8 @@ const pushConfigErrorText = ref('');
 const historyGroups = ref([]);
 const isHistoryLoading = ref(false);
 const historyErrorText = ref('');
+const historyDateFilters = reactive({});
+const historyOpenDates = reactive({});
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -1256,10 +1274,40 @@ async function loadHistoryImages() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '读取历史图片失败');
     historyGroups.value = data.groups || [];
+    for (const group of historyGroups.value) {
+      if (!historyDateFilters[group.type]) historyDateFilters[group.type] = '';
+      if (!historyOpenDates[group.type] && group.dateGroups?.[0]) {
+        historyOpenDates[group.type] = group.dateGroups[0].date;
+      }
+    }
   } catch (error) {
     historyErrorText.value = error?.message || String(error);
   } finally {
     isHistoryLoading.value = false;
+  }
+}
+
+function getVisibleHistoryDateGroups(group) {
+  const selectedDate = historyDateFilters[group.type];
+  const dateGroups = group.dateGroups || [];
+  if (!selectedDate) return dateGroups;
+  return dateGroups.filter(item => item.date === selectedDate);
+}
+
+function openHistoryDate(type) {
+  const selectedDate = historyDateFilters[type];
+  if (selectedDate) historyOpenDates[type] = selectedDate;
+}
+
+function isHistoryDateOpen(type, date) {
+  return historyOpenDates[type] === date;
+}
+
+function syncHistoryDateOpen(type, date, event) {
+  if (event.target.open) {
+    historyOpenDates[type] = date;
+  } else if (historyOpenDates[type] === date) {
+    historyOpenDates[type] = '';
   }
 }
 
