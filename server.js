@@ -994,7 +994,7 @@ async function ensureSkillExtracted(type) {
   if (!skillStat) throw new Error(`Skill file not found: ${path.relative(ROOT_DIR, skill.file)}`);
 
   const marker = path.join(skill.root, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:${skill.patchRuntime ? 'chrome-runtime-patch-v13' : 'runtime-v1'}`;
+  const markerValue = `${skillStat.mtimeMs}:${skill.patchRuntime ? 'chrome-runtime-patch-v14-font-embed' : 'runtime-v2-font-embed'}`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(skill.script)) return;

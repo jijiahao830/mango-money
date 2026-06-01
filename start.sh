@@ -191,7 +191,11 @@ echo "Temp: ${MANGO_TMP_DIR}"
 
 npm run build
 
-rm -rf .runtime/mango-finance-receipt
+rm -rf \
+  .runtime/mango-finance-receipt \
+  .runtime/mango-finance-deposit-receipt \
+  .runtime/mango-finance-balance-receipt \
+  .runtime/mango-finance-statement-receipt
 
 kill_port_processes "$PORT"
 
