@@ -550,20 +550,29 @@
               <span class="count-badge">{{ group.count }} 张</span>
             </header>
 
-            <div v-if="group.items.length" class="history-grid">
-              <article v-for="image in group.items" :key="image.url" class="history-item">
-                <button class="history-thumb" type="button" @click="previewHistoryImage(image)">
-                  <img :src="image.url" :alt="image.name" loading="lazy" />
-                </button>
-                <div class="history-meta">
-                  <strong>{{ image.name }}</strong>
-                  <span>{{ image.date }} · {{ formatFileSize(image.size) }}</span>
+            <div v-if="group.dateGroups?.length" class="history-date-list">
+              <details v-for="dateGroup in group.dateGroups" :key="`${group.type}-${dateGroup.date}`" class="history-date-group">
+                <summary>
+                  <span>{{ dateGroup.date }}</span>
+                  <strong>{{ dateGroup.count }} 张</strong>
+                </summary>
+
+                <div class="history-grid">
+                  <article v-for="image in dateGroup.items" :key="image.url" class="history-item">
+                    <button class="history-thumb" type="button" @click="previewHistoryImage(image)">
+                      <img :src="image.apiUrl || image.url" :alt="image.name" loading="lazy" />
+                    </button>
+                    <div class="history-meta">
+                      <strong>{{ image.name }}</strong>
+                      <span>{{ formatFileSize(image.size) }}</span>
+                    </div>
+                    <div class="history-actions">
+                      <button class="secondary" type="button" @click="previewHistoryImage(image)">预览</button>
+                      <a class="download-link" :href="image.apiUrl || image.url" :download="image.name">下载</a>
+                    </div>
+                  </article>
                 </div>
-                <div class="history-actions">
-                  <button class="secondary" type="button" @click="previewHistoryImage(image)">预览</button>
-                  <a class="download-link" :href="image.url" :download="image.name">下载</a>
-                </div>
-              </article>
+              </details>
             </div>
 
             <p v-else class="empty-text">暂无图片</p>
@@ -1256,7 +1265,7 @@ async function loadHistoryImages() {
 
 function previewHistoryImage(image) {
   revokePreviewObjectUrl();
-  result.imageUrl = image.url;
+  result.imageUrl = image.apiUrl || image.url;
   result.webpName = image.name;
   result.fileDate = `${image.label}/${image.date}`;
   result.recordSaved = true;

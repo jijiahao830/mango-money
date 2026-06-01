@@ -461,6 +461,7 @@ async function listHistoryImages() {
           if (!stat?.isFile()) continue;
 
           const relativeParts = [label, date, fileEntry.name].map(encodeURIComponent);
+          const apiUrl = `/api/create-file/${relativeParts.join('/')}`;
           items.push({
             type,
             label,
@@ -469,14 +470,26 @@ async function listHistoryImages() {
             size: stat.size,
             createdAt: stat.birthtime || stat.mtime,
             modifiedAt: stat.mtime,
-            url: `/create-file/${relativeParts.join('/')}`,
-            apiUrl: `/api/create-file/${relativeParts.join('/')}`
+            url: apiUrl,
+            apiUrl
           });
         }
       }
 
       items.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
-      return { type, label, count: items.length, items };
+      const dateGroups = [];
+      const dateMap = new Map();
+      for (const item of items) {
+        if (!dateMap.has(item.date)) {
+          const group = { date: item.date, count: 0, items: [] };
+          dateMap.set(item.date, group);
+          dateGroups.push(group);
+        }
+        const group = dateMap.get(item.date);
+        group.items.push(item);
+        group.count += 1;
+      }
+      return { type, label, count: items.length, items, dateGroups };
     })
   );
 

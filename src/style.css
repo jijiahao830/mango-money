@@ -512,10 +512,43 @@ hr {
   font-size: 18px;
 }
 
+.history-date-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-date-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.history-date-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: #111827;
+  font-weight: 800;
+}
+
+.history-date-group summary::marker {
+  color: #64748b;
+}
+
+.history-date-group summary strong {
+  color: #64748b;
+  font-size: 13px;
+}
+
 .history-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 14px;
+  padding: 0 12px 12px;
 }
 
 .history-item {
