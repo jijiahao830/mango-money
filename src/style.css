@@ -1257,6 +1257,21 @@ hr {
   box-shadow: 0 28px 90px rgba(15, 23, 42, 0.32);
 }
 
+.confirm-backdrop {
+  z-index: 30;
+}
+
+.confirm-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(440px, 100%);
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 90px rgba(15, 23, 42, 0.32);
+}
+
 .modal-header,
 .modal-footer,
 .preview-toolbar {
@@ -1274,6 +1289,38 @@ hr {
 .modal-header h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.confirm-message {
+  margin: 4px 0 0;
+  color: #111827;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.confirm-detail {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.confirm-footer {
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.danger-button {
+  background: #dc2626;
+}
+
+.danger-button:hover {
+  background: #b91c1c;
 }
 
 .icon-button {

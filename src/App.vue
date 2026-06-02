@@ -1028,6 +1028,27 @@
       </footer>
     </section>
   </div>
+
+  <div v-if="confirmDialog.open" class="modal-backdrop confirm-backdrop" @click.self="cancelConfirmDialog">
+    <section class="confirm-modal" aria-modal="true" role="dialog">
+      <header class="modal-header">
+        <h2>{{ confirmDialog.title }}</h2>
+        <button class="icon-button" type="button" aria-label="关闭确认弹窗" @click="cancelConfirmDialog">×</button>
+      </header>
+
+      <p class="confirm-message">{{ confirmDialog.message }}</p>
+      <p v-if="confirmDialog.detail" class="confirm-detail">{{ confirmDialog.detail }}</p>
+
+      <footer class="modal-footer confirm-footer">
+        <button class="secondary" type="button" @click="cancelConfirmDialog">
+          {{ confirmDialog.cancelText }}
+        </button>
+        <button class="danger-button" type="button" @click="acceptConfirmDialog">
+          {{ confirmDialog.confirmText }}
+        </button>
+      </footer>
+    </section>
+  </div>
 </template>
 
 <script setup>
@@ -1119,6 +1140,16 @@ const statementForm = reactive({
   vehicleDeposit: '',
   violationDeposit: ''
 });
+
+const confirmDialog = reactive({
+  open: false,
+  title: '',
+  message: '',
+  detail: '',
+  confirmText: '确认',
+  cancelText: '取消'
+});
+let confirmDialogResolver = null;
 
 const DEFAULT_PICKUP_DROPOFF_METHOD = '昆明 · 到店取车';
 const STORED_USER_KEY = 'mango_finance_user';
@@ -1525,7 +1556,7 @@ function addMiddleRow() {
   middleErrorText.value = '';
 }
 
-function removeMiddleRow() {
+async function removeMiddleRow() {
   const table = selectedMiddleTable.value;
   if (!table || !selectedMiddleRows.value.length) return;
   const targetKey = middleSelectedRowKey.value || getMiddleRowRenderKey(selectedMiddleRows.value[selectedMiddleRows.value.length - 1], selectedMiddleRows.value.length - 1);
@@ -1534,7 +1565,13 @@ function removeMiddleRow() {
   if (!row) return;
 
   const label = row.model_name || row.plate_number || row.order_id || row.username || getMiddleRowRenderKey(row);
-  if (!window.confirm(`确认删除这一行？\n${label}`)) return;
+  const confirmed = await openConfirmDialog({
+    title: '删除这一行',
+    message: '确认删除当前选中的这一行吗？',
+    detail: label,
+    confirmText: '删除'
+  });
+  if (!confirmed) return;
 
   const rowKey = getMiddleRowRenderKey(row);
   table.rows = table.rows.filter((item, index) => getMiddleRowRenderKey(item, index) !== rowKey);
@@ -1552,6 +1589,34 @@ function removeMiddleRow() {
   }
   middleSelectedRowKey.value = '';
   middleSaveStatusText.value = '';
+}
+
+function openConfirmDialog(options = {}) {
+  confirmDialog.open = true;
+  confirmDialog.title = options.title || '确认操作';
+  confirmDialog.message = options.message || '确认继续吗？';
+  confirmDialog.detail = options.detail || '';
+  confirmDialog.confirmText = options.confirmText || '确认';
+  confirmDialog.cancelText = options.cancelText || '取消';
+
+  return new Promise(resolve => {
+    confirmDialogResolver = resolve;
+  });
+}
+
+function closeConfirmDialog(result) {
+  confirmDialog.open = false;
+  const resolver = confirmDialogResolver;
+  confirmDialogResolver = null;
+  if (resolver) resolver(result);
+}
+
+function acceptConfirmDialog() {
+  closeConfirmDialog(true);
+}
+
+function cancelConfirmDialog() {
+  closeConfirmDialog(false);
 }
 
 function middleInputType(column) {
@@ -2280,7 +2345,13 @@ async function deleteAccount(user) {
   accountErrorText.value = '';
   accountStatusText.value = '';
 
-  if (!window.confirm(`确认删除账号 ${user.username}？`)) return;
+  const confirmed = await openConfirmDialog({
+    title: '删除账号',
+    message: '确认删除这个账号吗？删除后该账号将不能登录。',
+    detail: user.username,
+    confirmText: '删除'
+  });
+  if (!confirmed) return;
 
   isAccountLoading.value = true;
   try {
