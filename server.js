@@ -79,6 +79,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'POST' && url.pathname === '/api/middle-platform/table-data') {
+      const payload = await readJsonBody(req);
+      const result = await saveMiddlePlatformTableData(payload);
+      sendJson(res, result);
+      return;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/table-management') {
       const result = await getTableManagementConfig();
       sendJson(res, result);
@@ -575,7 +582,11 @@ async function listMiddlePlatformTables() {
       const columns = allowedColumns.filter(column => visibleKeys.includes(column.key));
       if (!columns.length) continue;
 
-      const selectSql = columns
+      const primaryKeyColumn = getPrimaryKeyColumn(schemaTable);
+      const selectColumns = primaryKeyColumn && !columns.some(column => column.key === primaryKeyColumn.key)
+        ? [primaryKeyColumn, ...columns]
+        : columns;
+      const selectSql = selectColumns
         .map(column => formatSelectColumn(column))
         .join(', ');
       const orderSql = buildMiddleTableOrderSql(schemaTable.tableName, allowedColumns);
@@ -590,6 +601,7 @@ async function listMiddlePlatformTables() {
         key: schemaTable.tableName,
         label: config.table_label || schemaTable.tableComment || schemaTable.tableName,
         databaseName: schemaTable.tableName,
+        primaryKey: primaryKeyColumn?.key || '',
         role: '',
         columns,
         rows
@@ -597,6 +609,151 @@ async function listMiddlePlatformTables() {
     }
 
     return { ok: true, tables };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function saveMiddlePlatformTableData(payload) {
+  const tableName = String(payload.tableName || '').trim();
+  const inserts = Array.isArray(payload.inserts) ? payload.inserts : [];
+  const updates = Array.isArray(payload.updates) ? payload.updates : [];
+  const deletes = Array.isArray(payload.deletes) ? payload.deletes : [];
+  if (!tableName) throw new Error('缺少表名');
+  if (!inserts.length && !updates.length && !deletes.length) return { ok: true, inserted: 0, updated: 0, deleted: 0 };
+
+  const conn = await createMysqlConnection();
+  try {
+    const schemaTables = await getSchemaTables(conn);
+    const schemaTable = schemaTables.find(table => table.tableName === tableName);
+    if (!schemaTable) throw new Error(`表不存在或不允许编辑：${tableName}`);
+
+    const primaryKeyColumn = getPrimaryKeyColumn(schemaTable);
+    if (!primaryKeyColumn) throw new Error(`${schemaTable.tableComment || tableName} 没有主键，不能在线编辑`);
+
+    const columnsByKey = new Map(schemaTable.columns.map(column => [column.key, column]));
+    let inserted = 0;
+    let updated = 0;
+    let deleted = 0;
+    const errors = [];
+
+    await conn.beginTransaction();
+
+    for (let rowIndex = 0; rowIndex < inserts.length; rowIndex += 1) {
+      const changes = inserts[rowIndex]?.changes && typeof inserts[rowIndex].changes === 'object' ? inserts[rowIndex].changes : {};
+      const fields = [];
+      const values = [];
+
+      for (const [field, rawValue] of Object.entries(changes)) {
+        const column = columnsByKey.get(field);
+        if (!column) {
+          errors.push(`新增第 ${rowIndex + 1} 行：字段 ${field} 不存在`);
+          continue;
+        }
+        if (!column.isEditable) {
+          errors.push(`新增第 ${rowIndex + 1} 行：${column.label} 不允许编辑`);
+          continue;
+        }
+
+        const normalized = normalizeMiddleCellValue(column, rawValue);
+        if (normalized.error) {
+          errors.push(`新增第 ${rowIndex + 1} 行 ${column.label}：${normalized.error}`);
+          continue;
+        }
+
+        if (normalized.value !== '' && normalized.value !== null) {
+          fields.push(field);
+          values.push(normalized.value);
+        }
+      }
+
+      if (!fields.length) {
+        errors.push(`新增第 ${rowIndex + 1} 行至少填写一个字段`);
+        continue;
+      }
+
+      const [result] = await conn.execute(
+        `INSERT INTO ${escapeIdentifier(tableName)}
+          (${fields.map(escapeIdentifier).join(', ')})
+         VALUES (${fields.map(() => '?').join(', ')})`,
+        values
+      );
+      inserted += result.affectedRows || 0;
+    }
+
+    for (let rowIndex = 0; rowIndex < updates.length; rowIndex += 1) {
+      const update = updates[rowIndex];
+      const primaryValue = update?.primaryKey?.value;
+      const changes = update?.changes && typeof update.changes === 'object' ? update.changes : {};
+
+      if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') {
+        errors.push(`第 ${rowIndex + 1} 行缺少主键，不能保存`);
+        continue;
+      }
+
+      const setParts = [];
+      const values = [];
+
+      for (const [field, rawValue] of Object.entries(changes)) {
+        const column = columnsByKey.get(field);
+        if (!column) {
+          errors.push(`字段 ${field} 不存在`);
+          continue;
+        }
+        if (!column.isEditable) {
+          errors.push(`${column.label} 不允许编辑`);
+          continue;
+        }
+
+        const normalized = normalizeMiddleCellValue(column, rawValue);
+        if (normalized.error) {
+          errors.push(`${column.label}：${normalized.error}`);
+          continue;
+        }
+
+        setParts.push(`${escapeIdentifier(field)} = ?`);
+        values.push(normalized.value);
+      }
+
+      if (setParts.length) {
+        values.push(primaryValue);
+        const [result] = await conn.execute(
+          `UPDATE ${escapeIdentifier(tableName)}
+           SET ${setParts.join(', ')}
+           WHERE ${escapeIdentifier(primaryKeyColumn.key)} = ?`,
+          values
+        );
+        updated += result.affectedRows || 0;
+      }
+    }
+
+    for (let rowIndex = 0; rowIndex < deletes.length; rowIndex += 1) {
+      const primaryValue = deletes[rowIndex]?.primaryKey?.value;
+      if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') {
+        errors.push(`删除第 ${rowIndex + 1} 行缺少主键`);
+        continue;
+      }
+
+      const [result] = await conn.execute(
+        `DELETE FROM ${escapeIdentifier(tableName)}
+         WHERE ${escapeIdentifier(primaryKeyColumn.key)} = ?`,
+        [primaryValue]
+      );
+      deleted += result.affectedRows || 0;
+    }
+
+    if (errors.length) {
+      await conn.rollback();
+      const error = new Error(errors.join('\n'));
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await conn.commit();
+    return { ok: true, inserted, updated, deleted };
+  } catch (error) {
+    await conn.rollback?.().catch?.(() => {});
+    throw error;
   } finally {
     await conn.end();
   }
@@ -1042,6 +1199,10 @@ async function getSchemaTables(conn) {
       COLUMN_NAME AS columnName,
       COLUMN_COMMENT AS columnComment,
       DATA_TYPE AS dataType,
+      COLUMN_TYPE AS columnType,
+      IS_NULLABLE AS isNullable,
+      COLUMN_KEY AS columnKey,
+      EXTRA AS extra,
       ORDINAL_POSITION AS ordinalPosition
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
@@ -1057,6 +1218,12 @@ async function getSchemaTables(conn) {
       key: column.columnName,
       label: column.columnComment || column.columnName,
       dataType: column.dataType,
+      columnType: column.columnType,
+      enumValues: parseEnumValues(column.columnType),
+      isNullable: column.isNullable === 'YES',
+      columnKey: column.columnKey || '',
+      extra: column.extra || '',
+      isEditable: isEditableMiddleColumn(column),
       ordinalPosition: column.ordinalPosition
     });
   }
@@ -1076,6 +1243,80 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+function parseEnumValues(columnType) {
+  const raw = String(columnType || '');
+  if (!raw.startsWith('enum(')) return [];
+  const body = raw.slice(5, -1);
+  const values = [];
+  let current = '';
+  let quoted = false;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index];
+    if (char === "'" && body[index - 1] !== '\\') {
+      quoted = !quoted;
+      if (!quoted) {
+        values.push(current.replace(/\\'/g, "'"));
+        current = '';
+      }
+      continue;
+    }
+    if (quoted) current += char;
+  }
+
+  return values;
+}
+
+function isEditableMiddleColumn(column) {
+  const key = column.columnName;
+  const extra = String(column.extra || '').toLowerCase();
+  if (column.columnKey === 'PRI') return false;
+  if (extra.includes('auto_increment') || extra.includes('generated')) return false;
+  if (['id', 'create_time', 'update_time'].includes(key)) return false;
+  return true;
+}
+
+function getPrimaryKeyColumn(schemaTable) {
+  return schemaTable.columns.find(column => column.columnKey === 'PRI')
+    || schemaTable.columns.find(column => column.key === 'id')
+    || null;
+}
+
+function normalizeMiddleCellValue(column, rawValue) {
+  const value = rawValue === undefined || rawValue === null ? '' : String(rawValue).trim();
+  if (value === '') {
+    return column.isNullable ? { value: null } : { value: '' };
+  }
+
+  if (column.enumValues?.length && !column.enumValues.includes(value)) {
+    return { error: `只能选择：${column.enumValues.join('、')}` };
+  }
+
+  if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint'].includes(column.dataType)) {
+    if (!/^-?\d+$/.test(value)) return { error: '只能填写整数' };
+    return { value: Number(value) };
+  }
+
+  if (['decimal', 'float', 'double'].includes(column.dataType)) {
+    if (!/^-?\d+(\.\d+)?$/.test(value)) return { error: '只能填写数字' };
+    return { value };
+  }
+
+  if (column.dataType === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return { error: '日期格式必须是 YYYY-MM-DD' };
+    return { value };
+  }
+
+  if (['datetime', 'timestamp'].includes(column.dataType)) {
+    if (!/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?$/.test(value)) {
+      return { error: '时间格式必须是 YYYY-MM-DD 或 YYYY-MM-DD HH:mm:ss' };
+    }
+    return { value };
+  }
+
+  return { value };
 }
 
 function formatSelectColumn(column) {

@@ -193,6 +193,9 @@
             <button class="secondary refresh-button" type="button" :disabled="isMiddleLoading" @click="loadMiddlePlatform">
               刷新
             </button>
+            <button type="button" :disabled="isMiddleSaving || !middleDirtyCount" @click="saveMiddleTableChanges">
+              {{ isMiddleSaving ? '保存中' : `保存${middleDirtyCount ? `（${middleDirtyCount}）` : ''}` }}
+            </button>
           </header>
 
           <div v-if="isMiddleLoading" class="card account-create-card">
@@ -202,14 +205,6 @@
           <p v-else-if="middleErrorText" class="error-text">{{ middleErrorText }}</p>
 
           <template v-else-if="selectedMiddleTable">
-            <section class="middle-dashboard" aria-label="表格看板">
-              <article v-for="card in middleDashboardCards" :key="card.key" class="middle-stat-card">
-                <span>{{ card.label }}</span>
-                <strong>{{ card.value }}</strong>
-                <em>{{ card.detail }}</em>
-              </article>
-            </section>
-
             <section class="middle-controls" aria-label="表格筛选">
               <label>
                 <span>搜索</span>
@@ -248,11 +243,34 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(row, rowIndex) in selectedMiddleRows" :key="row.vehicle_record_id || rowIndex">
+                  <tr
+                    v-for="(row, rowIndex) in selectedMiddleRows"
+                    :key="getMiddleRowRenderKey(row, rowIndex)"
+                    :class="{ selected: middleSelectedRowKey === getMiddleRowRenderKey(row, rowIndex), pendingDelete: row.__pendingDelete }"
+                    @click="selectMiddleRow(row, rowIndex)"
+                  >
                     <td class="row-index">{{ rowIndex + 1 }}</td>
                     <td v-for="column in selectedMiddleTable.columns" :key="column.key">
+                      <select
+                        v-if="column.isEditable && column.enumValues?.length"
+                        v-model="row[column.key]"
+                        class="middle-cell-input"
+                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
+                        @change="markMiddleCellDirty(row, column.key)"
+                      >
+                        <option value="">空</option>
+                        <option v-for="option in column.enumValues" :key="option" :value="option">{{ option }}</option>
+                      </select>
+                      <input
+                        v-else-if="column.isEditable"
+                        v-model="row[column.key]"
+                        class="middle-cell-input"
+                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
+                        :type="middleInputType(column)"
+                        @input="markMiddleCellDirty(row, column.key)"
+                      />
                       <span
-                        v-if="isMiddleTagColumn(column.key) && row[column.key]"
+                        v-else-if="isMiddleTagColumn(column.key) && row[column.key]"
                         class="middle-tag"
                         :class="middleTagClass(column.key, row[column.key])"
                       >
@@ -263,8 +281,13 @@
                   </tr>
                 </tbody>
               </table>
+              <div class="middle-row-tools" aria-label="行操作">
+                <button class="middle-row-tool" type="button" title="添加一行" @click="addMiddleRow">+</button>
+                <button class="middle-row-tool" type="button" title="删除一行" @click="removeMiddleRow">−</button>
+              </div>
               <p v-if="!selectedMiddleRows.length" class="empty-text middle-empty">没有符合筛选条件的数据</p>
             </div>
+            <p v-if="middleSaveStatusText" class="status-text">{{ middleSaveStatusText }}</p>
           </template>
 
           <p v-else class="empty-text">暂无中台表数据</p>
@@ -1147,10 +1170,16 @@ const healthErrorText = ref('');
 const middleTables = ref([]);
 const activeMiddleTable = ref('cw_car');
 const isMiddleLoading = ref(false);
+const isMiddleSaving = ref(false);
 const middleErrorText = ref('');
+const middleSaveStatusText = ref('');
 const middleSearchText = ref('');
 const middleStatusFilter = ref('');
 const middleSourceFilter = ref('');
+const middleDirtyRows = reactive({});
+const middlePendingDeletes = reactive({});
+const middleSelectedRowKey = ref('');
+let middleDraftRowIndex = 0;
 const tableConfigItems = ref([]);
 const activeTableConfigName = ref('');
 const isTableConfigLoading = ref(false);
@@ -1196,6 +1225,10 @@ const currentDisplayName = computed(() => currentUser.value?.displayName || curr
 const selectedMiddleTable = computed(() =>
   middleTables.value.find(table => table.key === activeMiddleTable.value) || middleTables.value[0] || null
 );
+const middleDirtyCount = computed(() => {
+  const newRows = selectedMiddleTable.value?.rows.filter(row => row.__isNew).length || 0;
+  return Object.keys(middleDirtyRows).length + Object.keys(middlePendingDeletes).length + newRows;
+});
 const selectedTableConfig = computed(() =>
   tableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || tableConfigItems.value[0] || null
 );
@@ -1382,10 +1415,14 @@ function navigatePage(page) {
 function selectMiddleTable(key) {
   activeMiddleTable.value = key;
   clearMiddleFilters();
+  clearMiddleDirtyRows();
+  middleSaveStatusText.value = '';
+  middleErrorText.value = '';
 }
 
 async function loadMiddlePlatform() {
   middleErrorText.value = '';
+  middleSaveStatusText.value = '';
   isMiddleLoading.value = true;
 
   try {
@@ -1396,6 +1433,7 @@ async function loadMiddlePlatform() {
     if (!middleTables.value.some(table => table.key === activeMiddleTable.value)) {
       activeMiddleTable.value = middleTables.value[0]?.key || 'cw_car';
     }
+    clearMiddleDirtyRows();
   } catch (error) {
     middleErrorText.value = error?.message || String(error);
   } finally {
@@ -1407,6 +1445,225 @@ function clearMiddleFilters() {
   middleSearchText.value = '';
   middleStatusFilter.value = '';
   middleSourceFilter.value = '';
+}
+
+function clearMiddleDirtyRows() {
+  for (const key of Object.keys(middleDirtyRows)) delete middleDirtyRows[key];
+  for (const key of Object.keys(middlePendingDeletes)) delete middlePendingDeletes[key];
+  middleSelectedRowKey.value = '';
+}
+
+function getMiddlePrimaryColumn() {
+  return selectedMiddleTable.value?.primaryKey || selectedMiddleTable.value?.columns.find(column => column.columnKey === 'PRI')?.key || 'id';
+}
+
+function getMiddleRowRenderKey(row, rowIndex = 0) {
+  if (row?.__draftId) return row.__draftId;
+  const primaryKey = getMiddlePrimaryColumn();
+  const primaryValue = row?.[primaryKey];
+  return primaryValue === undefined || primaryValue === null || primaryValue === ''
+    ? `row-${rowIndex}`
+    : String(primaryValue);
+}
+
+function getMiddleRowDirtyKey(row) {
+  if (row?.__draftId) return row.__draftId;
+  const primaryKey = getMiddlePrimaryColumn();
+  const primaryValue = row?.[primaryKey];
+  return `${selectedMiddleTable.value?.key || ''}::${primaryKey}::${primaryValue}`;
+}
+
+function selectMiddleRow(row, rowIndex) {
+  middleSelectedRowKey.value = getMiddleRowRenderKey(row, rowIndex);
+}
+
+function markMiddleCellDirty(row, field) {
+  const table = selectedMiddleTable.value;
+  if (!table) return;
+  if (row.__isNew) {
+    middleSaveStatusText.value = '';
+    return;
+  }
+  const primaryKey = getMiddlePrimaryColumn();
+  const primaryValue = row?.[primaryKey];
+  if (primaryValue === undefined || primaryValue === null || primaryValue === '') {
+    middleErrorText.value = '当前行缺少主键，不能保存';
+    return;
+  }
+
+  const key = getMiddleRowDirtyKey(row);
+  if (!middleDirtyRows[key]) {
+    middleDirtyRows[key] = {
+      primaryKey: { key: primaryKey, value: primaryValue },
+      changes: {}
+    };
+  }
+  middleDirtyRows[key].changes[field] = row[field];
+  middleSaveStatusText.value = '';
+}
+
+function isMiddleCellDirty(row, field) {
+  if (row?.__isNew) return String(row[field] ?? '').trim() !== '';
+  const dirty = middleDirtyRows[getMiddleRowDirtyKey(row)];
+  return Boolean(dirty?.changes && Object.prototype.hasOwnProperty.call(dirty.changes, field));
+}
+
+function addMiddleRow() {
+  const table = selectedMiddleTable.value;
+  if (!table) return;
+  clearMiddleFilters();
+  const row = {
+    __isNew: true,
+    __draftId: `draft-${Date.now()}-${middleDraftRowIndex++}`
+  };
+  for (const column of table.columns) {
+    row[column.key] = '';
+  }
+  table.rows.push(row);
+  middleSelectedRowKey.value = row.__draftId;
+  middleSaveStatusText.value = '';
+  middleErrorText.value = '';
+}
+
+function removeMiddleRow() {
+  const table = selectedMiddleTable.value;
+  if (!table || !selectedMiddleRows.value.length) return;
+  const targetKey = middleSelectedRowKey.value || getMiddleRowRenderKey(selectedMiddleRows.value[selectedMiddleRows.value.length - 1], selectedMiddleRows.value.length - 1);
+  const row = table.rows.find((item, index) => getMiddleRowRenderKey(item, index) === targetKey)
+    || selectedMiddleRows.value[selectedMiddleRows.value.length - 1];
+  if (!row) return;
+
+  const label = row.model_name || row.plate_number || row.order_id || row.username || getMiddleRowRenderKey(row);
+  if (!window.confirm(`确认删除这一行？\n${label}`)) return;
+
+  const rowKey = getMiddleRowRenderKey(row);
+  table.rows = table.rows.filter((item, index) => getMiddleRowRenderKey(item, index) !== rowKey);
+  if (row.__isNew) {
+    delete middleDirtyRows[row.__draftId];
+  } else {
+    const primaryKey = getMiddlePrimaryColumn();
+    const primaryValue = row[primaryKey];
+    if (primaryValue !== undefined && primaryValue !== null && primaryValue !== '') {
+      middlePendingDeletes[rowKey] = {
+        primaryKey: { key: primaryKey, value: primaryValue }
+      };
+      delete middleDirtyRows[getMiddleRowDirtyKey(row)];
+    }
+  }
+  middleSelectedRowKey.value = '';
+  middleSaveStatusText.value = '';
+}
+
+function middleInputType(column) {
+  if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'float', 'double'].includes(column.dataType)) return 'number';
+  if (column.dataType === 'date') return 'date';
+  return 'text';
+}
+
+function validateMiddleChanges() {
+  const table = selectedMiddleTable.value;
+  if (!table) return '没有选择表格';
+  const columnsByKey = new Map(table.columns.map(column => [column.key, column]));
+  const errors = [];
+  const validateField = (field, value, prefix = '') => {
+    const column = columnsByKey.get(field);
+    if (!column) {
+      errors.push(`${prefix}字段 ${field} 不存在`);
+      return;
+    }
+    if (!column.isEditable) {
+      errors.push(`${prefix}${column.label} 不允许编辑`);
+      return;
+    }
+
+    const raw = String(value ?? '').trim();
+    if (!raw) return;
+    if (column.enumValues?.length && !column.enumValues.includes(raw)) {
+      errors.push(`${prefix}${column.label} 只能选择：${column.enumValues.join('、')}`);
+    }
+    if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint'].includes(column.dataType) && !/^-?\d+$/.test(raw)) {
+      errors.push(`${prefix}${column.label} 只能填写整数`);
+    }
+    if (['decimal', 'float', 'double'].includes(column.dataType) && !/^-?\d+(\.\d+)?$/.test(raw)) {
+      errors.push(`${prefix}${column.label} 只能填写数字`);
+    }
+    if (column.dataType === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      errors.push(`${prefix}${column.label} 日期格式必须是 YYYY-MM-DD`);
+    }
+  };
+
+  const newRows = table.rows.filter(row => row.__isNew);
+  for (let index = 0; index < newRows.length; index += 1) {
+    const row = newRows[index];
+    const changes = getMiddleInsertChanges(row);
+    if (!Object.keys(changes).length) {
+      errors.push(`新增第 ${index + 1} 行至少填写一个字段`);
+      continue;
+    }
+    for (const [field, value] of Object.entries(changes)) {
+      validateField(field, value, `新增第 ${index + 1} 行 `);
+    }
+  }
+
+  for (const dirty of Object.values(middleDirtyRows)) {
+    for (const [field, value] of Object.entries(dirty.changes || {})) {
+      validateField(field, value);
+    }
+  }
+
+  return errors.join('\n');
+}
+
+function getMiddleInsertChanges(row) {
+  const changes = {};
+  for (const column of selectedMiddleTable.value?.columns || []) {
+    if (!column.isEditable) continue;
+    const value = row[column.key];
+    if (String(value ?? '').trim() !== '') {
+      changes[column.key] = value;
+    }
+  }
+  return changes;
+}
+
+async function saveMiddleTableChanges() {
+  const validationError = validateMiddleChanges();
+  middleErrorText.value = '';
+  middleSaveStatusText.value = '';
+
+  if (validationError) {
+    middleErrorText.value = validationError;
+    return;
+  }
+
+  const inserts = (selectedMiddleTable.value?.rows || [])
+    .filter(row => row.__isNew)
+    .map(row => ({ changes: getMiddleInsertChanges(row) }));
+  const updates = Object.values(middleDirtyRows).filter(item => Object.keys(item.changes || {}).length);
+  const deletes = Object.values(middlePendingDeletes);
+  if ((!inserts.length && !updates.length && !deletes.length) || !selectedMiddleTable.value) return;
+
+  isMiddleSaving.value = true;
+  try {
+    const response = await fetch('/api/middle-platform/table-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tableName: selectedMiddleTable.value.key,
+        inserts,
+        updates,
+        deletes
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '保存失败');
+    await loadMiddlePlatform();
+    middleSaveStatusText.value = `已保存：新增 ${data.inserted || 0} 行，修改 ${data.updated || 0} 行，删除 ${data.deleted || 0} 行`;
+  } catch (error) {
+    middleErrorText.value = error?.message || String(error);
+  } finally {
+    isMiddleSaving.value = false;
+  }
 }
 
 function getUniqueMiddleValues(key) {

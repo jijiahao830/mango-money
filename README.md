@@ -276,6 +276,7 @@ sudo apt install -y chromium-browser webp
   - 用户表
   - 客户表
   - 维修记录表
+  - 挂靠表
   
 
 ### 第 1 阶段：稳定当前系统

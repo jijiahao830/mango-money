@@ -270,6 +270,11 @@ h1 {
   margin-bottom: 12px;
 }
 
+.middle-toolbar > button {
+  min-width: 96px;
+  margin: 0;
+}
+
 .middle-toolbar h1 {
   margin: 0 0 5px;
   font-size: 22px;
@@ -397,6 +402,30 @@ h1 {
   background: rgba(255, 255, 255, 0.94);
 }
 
+.middle-data-table tr.selected td {
+  background: #eff6ff;
+}
+
+.middle-data-table tr.pendingDelete td {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.middle-cell-input {
+  width: 100%;
+  min-width: 96px;
+  height: 30px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.middle-cell-input.changed {
+  border-color: #f97316;
+  background: #fff7ed;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.12);
+}
+
 .middle-data-table .row-index {
   position: sticky;
   left: 0;
@@ -435,6 +464,36 @@ h1 {
 
 .middle-empty {
   padding: 18px;
+}
+
+.middle-row-tools {
+  position: sticky;
+  left: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  padding: 7px 10px;
+  border-top: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  border-top-right-radius: 10px;
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.middle-row-tool {
+  min-width: 0;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border-color: #cbd5e1;
+  color: #111827;
+  background: #ffffff;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .health-panel {
