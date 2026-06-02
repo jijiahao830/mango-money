@@ -165,10 +165,6 @@
 
       <section v-else-if="activePage === 'middle'" class="middle-platform-page">
         <aside class="middle-sidebar" aria-label="中台表列表">
-          <header class="middle-sidebar-header">
-            <strong>财务中台</strong>
-          </header>
-
           <button
             v-for="table in middleTables"
             :key="table.key"
@@ -177,7 +173,6 @@
             type="button"
             @click="selectMiddleTable(table.key)"
           >
-            <span class="table-icon">×</span>
             <span>{{ table.label }}</span>
           </button>
         </aside>
@@ -190,12 +185,14 @@
                 数据表：{{ selectedMiddleTable.databaseName }} · 共 {{ selectedMiddleTable.rows.length }} 条
               </p>
             </div>
-            <button class="secondary refresh-button" type="button" :disabled="isMiddleLoading" @click="loadMiddlePlatform">
-              刷新
-            </button>
-            <button type="button" :disabled="isMiddleSaving || !middleDirtyCount" @click="saveMiddleTableChanges">
-              {{ isMiddleSaving ? '保存中' : `保存${middleDirtyCount ? `（${middleDirtyCount}）` : ''}` }}
-            </button>
+            <div class="middle-toolbar-actions">
+              <button class="secondary refresh-button" type="button" :disabled="isMiddleLoading" @click="loadMiddlePlatform">
+                刷新
+              </button>
+              <button type="button" :disabled="isMiddleSaving || !middleDirtyCount" @click="saveMiddleTableChanges">
+                {{ isMiddleSaving ? '保存中' : `保存${middleDirtyCount ? `（${middleDirtyCount}）` : ''}` }}
+              </button>
+            </div>
           </header>
 
           <div v-if="isMiddleLoading" class="card account-create-card">
