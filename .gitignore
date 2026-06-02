@@ -3,5 +3,6 @@ dist
 build
 .runtime
 create_file/
+upload_file/
 app_config.json
 .DS_Store

@@ -7,7 +7,7 @@
 - 登录与账号权限
   - 支持账号密码登录。
   - 用户表为 `cw_user`。
-  - 支持管理员和工作人员权限。
+  - 支持管理员、车队长、销售、财务四类权限。
   - 只有管理员可进入账号管理和推送配置。
 
 - 单据生成
@@ -102,22 +102,83 @@
 ## 技术结构
 
 - 前端：Vue 3 + Vite
+- 前端路由：Vue Router
 - 后端：Node.js 原生 HTTP 服务
 - 数据库：MySQL
 - 图片渲染：本地 skill + Chrome/Chromium 截图 + WebP 转换
 - 推送：企业微信 webhook
 
-主要目录：
+## 目录结构说明
 
 ```text
-src/                 前端页面
-skills/              单据图片生成 skill
-server.js            后端 API 与静态资源服务
-start.sh             Linux/macOS 一键启动脚本
-create_file/         生成图片保存目录，已加入 git 忽略
-.runtime/            skill 解压运行目录，已加入 git 忽略
-app_config.json      本地配置文件，已加入 git 忽略
+mango-money/
+├── src/                         前端源码目录，Vue 页面、样式和前端交互逻辑都在这里
+│   ├── App.vue                   主页面组件，包含登录、首页、单据生成、历史图片、推送、账号管理等页面
+│   ├── main.js                   Vue 入口文件
+│   ├── style.css                 全局样式文件
+│   └── assets/                   前端静态资源，如 logo、favicon 等
+│
+├── public/                       Vite 公共静态资源目录，构建时会原样复制到 build
+│
+├── skills/                       单据图片生成 skill 包目录
+│   ├── mango-finance-deposit-receipt.skill     定金单生成 skill
+│   ├── mango-finance-balance-receipt.skill     尾款单生成 skill
+│   └── mango-finance-statement-receipt.skill   对账单生成 skill
+│
+├── create_file/                  图片生成结果保存目录，已加入 git 忽略
+│   ├── djd/                      定金单生成图片保存目录
+│   ├── wkd/                      尾款单生成图片保存目录
+│   ├── dzd/                      对账单生成图片保存目录
+│   └── _tmp/                     图片生成和转换过程中的临时文件目录
+│
+├── upload_file/                  业务图片和文件上传目录，已加入 git 忽略
+│   ├── cars/                     车辆相关文件
+│   │   ├── compulsory_insurance_policy_photo/  交强险保单照片，对应 cw_car.compulsory_insurance_policy_photo
+│   │   ├── commercial_insurance_policy_photo/  商业险保单照片，对应 cw_car.commercial_insurance_policy_photo
+│   │   └── vehicle_photos/        车辆照片，对应 cw_car.vehicle_photos
+│   ├── customers/                客户相关文件
+│   │   ├── contracts/            客户合同
+│   │   └── id_cards/             客户证件照片
+│   ├── partners/                 同行、合作方相关文件
+│   │   └── contracts/            同行、合作方合同
+│   ├── affiliated_owners/        挂靠车主相关文件
+│   │   └── contracts/            挂靠车主合同
+│   └── _tmp/                     上传过程中的临时文件
+│
+├── .runtime/                     后端运行时临时目录，已加入 git 忽略
+│   ├── mango-finance-*/          skill 解压后的运行目录
+│   └── requests/                 生成图片时保存的临时请求数据
+│
+├── build/                        生产构建目录，服务器 Nginx root 指向这里，已加入 git 忽略
+│
+├── dist/                         旧构建目录，当前项目主要使用 build，可以后续清理
+│
+├── output/                       本地测试或脚本输出目录，不作为正式业务图片目录
+│
+├── node_modules/                 npm 依赖目录，已加入 git 忽略
+│
+├── server.js                     Node 后端服务，提供 API、登录、数据库写入、图片生成、历史图片、企业微信推送
+├── start.sh                      Linux/macOS 一键启动脚本，启动前会检查端口、构建前端、启动后端
+├── vite.config.js                Vite 配置文件，配置构建目录和本地开发端口
+├── package.json                  项目依赖和 npm 脚本配置
+├── package-lock.json             npm 依赖锁定文件
+├── index.html                    Vite HTML 入口文件
+├── app_config.json               本地配置文件，保存 MySQL 和企业微信 webhook，已加入 git 忽略，不能提交
+├── .npmrc                        npm 源配置文件
+├── .gitignore                    git 忽略规则
+├── README.md                     项目说明文档
+├── 中台.xlsx                     财务中台历史表结构参考文件
+├── 中台数据.xlsx                 财务中台历史数据导入参考文件
+└── 经典宋体简.ttf                对账单等图片生成使用的字体源文件
 ```
+
+目录使用原则：
+
+- 业务源码主要放在 `src/`、`server.js`、`skills/`。
+- 生成图片统一保存到 `create_file/`，不要放到 `src/` 或 `public/`。
+- 合同、保单、车辆照片等上传文件后续建议统一放到 `upload_file/`，数据库只保存文件路径和文件信息。
+- `.runtime/`、`build/`、`node_modules/`、`create_file/`、`upload_file/` 都是运行或构建产物，不提交到 git。
+- `app_config.json` 里有数据库和推送配置，只在本机或服务器保留，不提交到 git。
 
 ## 本地启动
 
@@ -150,6 +211,20 @@ app_config.json      本地配置文件，已加入 git 忽略
 
 ```text
 8764
+```
+
+常用页面路径：
+
+```text
+/home                首页
+/middle-platform     中台
+/deposit             定金单
+/balance             尾款单
+/statement           对账单
+/history             历史图片
+/push                推送配置
+/accounts            账号管理
+/table-management    表格管理
 ```
 
 ## 部署说明
@@ -195,6 +270,14 @@ sudo apt install -y chromium-browser webp
 
 目标：把当前单据生成工具逐步升级为现有网站中的完整财务中台，先保证当前定金单、尾款单、对账单稳定运行，再一层一层接入订单、车辆、客户、财务流水和经营分析。
 
+## 表格梳理
+- 基础表
+  - 车辆表
+  - 用户表
+  - 客户表
+  - 维修记录表
+  
+
 ### 第 1 阶段：稳定当前系统
 
 - 确认现有域名、Nginx、Node 服务、MySQL、图片生成环境稳定。
@@ -204,8 +287,10 @@ sudo apt install -y chromium-browser webp
   - 企业微信 webhook 未配置时会显示 `configured: false`，但不影响基础服务健康状态。
 - 固定访问入口：用户访问财务域名时默认进入登录页。
 - 完成基础账号体系：
-  - 管理员账号
-  - 工作人员账号
+  - 管理员账号administrator
+  - 车队长账号fleet_manager
+  - 销售账号sales
+  - 财务账号finance
   - 账号启用/停用
   - 权限字段 `permission`
 - 保留并稳定当前页面：
@@ -235,7 +320,7 @@ sudo apt install -y chromium-browser webp
   - 执行 `./start.sh` 能正常启动。
   - 访问财务域名默认进入登录页。
   - 登录后默认进入首页。
-  - 管理员能看到推送和账号管理，工作人员不能看到。
+  - 管理员能看到推送和账号管理，车队长、销售、财务不能看到。
   - 定金单、尾款单、对账单都能生成 WebP。
   - 生成文件进入对应目录。
   - 历史图片能按类型和日期查看。
@@ -246,15 +331,17 @@ sudo apt install -y chromium-browser webp
 
 使用的数据库是：cardata_money
 - 梳理当前已有表：
-  - `cw_user`
   - `cw_djd`
   - `cw_wkd`
   - `cw_dzd`
 - 根据 `中台.xlsx` 拆分核心业务表。
 - 优先建立这些基础表：
-  - 用户表
+  - 用户表`cw_user`
   - 客户表
-  - 车辆表
+  - 车辆表`cw_car`
+    - 中文表注释：车型参数表
+    - 字段来源：`中台.xlsx` 中的 `车型参数表（车队长）`
+    - 已包含 `create_time` 创建时间和 `update_time` 更新时间
   - 订单主表
   - 押金表
   - 收款流水表
@@ -421,7 +508,6 @@ sudo apt install -y chromium-browser webp
   - 财务
   - 销售
   - 车队长
-  - 普通工作人员
 - 增加操作日志：
   - 登录
   - 新增

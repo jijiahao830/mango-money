@@ -44,15 +44,23 @@
             class="nav-button"
             :class="{ active: activePage === 'home' }"
             type="button"
-            @click="activePage = 'home'"
+            @click="navigatePage('home')"
           >
             首页
           </button>
           <button
             class="nav-button"
+            :class="{ active: activePage === 'middle' }"
+            type="button"
+            @click="navigatePage('middle')"
+          >
+            中台
+          </button>
+          <button
+            class="nav-button"
             :class="{ active: activePage === 'deposit' }"
             type="button"
-            @click="activePage = 'deposit'"
+            @click="navigatePage('deposit')"
           >
             定金单
           </button>
@@ -60,7 +68,7 @@
             class="nav-button"
             :class="{ active: activePage === 'balance' }"
             type="button"
-            @click="activePage = 'balance'"
+            @click="navigatePage('balance')"
           >
             尾款单
           </button>
@@ -68,7 +76,7 @@
             class="nav-button"
             :class="{ active: activePage === 'statement' }"
             type="button"
-            @click="activePage = 'statement'"
+            @click="navigatePage('statement')"
           >
             对帐单
           </button>
@@ -76,7 +84,7 @@
             class="nav-button"
             :class="{ active: activePage === 'history' }"
             type="button"
-            @click="activePage = 'history'"
+            @click="navigatePage('history')"
           >
             历史图片
           </button>
@@ -85,7 +93,7 @@
             class="nav-button"
             :class="{ active: activePage === 'push' }"
             type="button"
-            @click="activePage = 'push'"
+            @click="navigatePage('push')"
           >
             推送
           </button>
@@ -94,9 +102,18 @@
             class="nav-button"
             :class="{ active: activePage === 'accounts' }"
             type="button"
-            @click="activePage = 'accounts'"
+            @click="navigatePage('accounts')"
           >
             账号管理
+          </button>
+          <button
+            v-if="isAdministrator"
+            class="nav-button"
+            :class="{ active: activePage === 'tableManagement' }"
+            type="button"
+            @click="navigatePage('tableManagement')"
+          >
+            表格管理
           </button>
         </div>
 
@@ -144,6 +161,114 @@
 
           <p v-if="healthErrorText" class="error-text">{{ healthErrorText }}</p>
         </div>
+      </section>
+
+      <section v-else-if="activePage === 'middle'" class="middle-platform-page">
+        <aside class="middle-sidebar" aria-label="中台表列表">
+          <header class="middle-sidebar-header">
+            <strong>财务中台</strong>
+          </header>
+
+          <button
+            v-for="table in middleTables"
+            :key="table.key"
+            class="middle-table-tab"
+            :class="{ active: activeMiddleTable === table.key }"
+            type="button"
+            @click="selectMiddleTable(table.key)"
+          >
+            <span class="table-icon">×</span>
+            <span>{{ table.label }}</span>
+          </button>
+        </aside>
+
+        <section class="middle-content">
+          <header class="middle-toolbar">
+            <div>
+              <h1>{{ selectedMiddleTable?.label || '中台' }}</h1>
+              <p v-if="selectedMiddleTable">
+                数据表：{{ selectedMiddleTable.databaseName }} · 共 {{ selectedMiddleTable.rows.length }} 条
+              </p>
+            </div>
+            <button class="secondary refresh-button" type="button" :disabled="isMiddleLoading" @click="loadMiddlePlatform">
+              刷新
+            </button>
+          </header>
+
+          <div v-if="isMiddleLoading" class="card account-create-card">
+            <p class="empty-text">正在读取中台数据...</p>
+          </div>
+
+          <p v-else-if="middleErrorText" class="error-text">{{ middleErrorText }}</p>
+
+          <template v-else-if="selectedMiddleTable">
+            <section class="middle-dashboard" aria-label="表格看板">
+              <article v-for="card in middleDashboardCards" :key="card.key" class="middle-stat-card">
+                <span>{{ card.label }}</span>
+                <strong>{{ card.value }}</strong>
+                <em>{{ card.detail }}</em>
+              </article>
+            </section>
+
+            <section class="middle-controls" aria-label="表格筛选">
+              <label>
+                <span>搜索</span>
+                <input v-model="middleSearchText" placeholder="车牌号、车型名称、车辆ID" />
+              </label>
+              <label>
+                <span>车辆状态</span>
+                <select v-model="middleStatusFilter">
+                  <option value="">全部</option>
+                  <option v-for="status in middleStatusOptions" :key="status" :value="status">{{ status }}</option>
+                </select>
+              </label>
+              <label>
+                <span>来源</span>
+                <select v-model="middleSourceFilter">
+                  <option value="">全部</option>
+                  <option v-for="source in middleSourceOptions" :key="source" :value="source">{{ source }}</option>
+                </select>
+              </label>
+              <button class="secondary middle-reset-button" type="button" @click="clearMiddleFilters">清空筛选</button>
+            </section>
+
+            <div class="middle-table-summary">
+              <strong>当前显示 {{ selectedMiddleRows.length }} 条</strong>
+              <span>筛选不会修改数据库，只影响当前看板显示。</span>
+            </div>
+
+            <div class="middle-table-wrap">
+              <table class="middle-data-table">
+                <thead>
+                  <tr>
+                    <th class="row-index">#</th>
+                    <th v-for="column in selectedMiddleTable.columns" :key="column.key">
+                      {{ column.label }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(row, rowIndex) in selectedMiddleRows" :key="row.vehicle_record_id || rowIndex">
+                    <td class="row-index">{{ rowIndex + 1 }}</td>
+                    <td v-for="column in selectedMiddleTable.columns" :key="column.key">
+                      <span
+                        v-if="isMiddleTagColumn(column.key) && row[column.key]"
+                        class="middle-tag"
+                        :class="middleTagClass(column.key, row[column.key])"
+                      >
+                        {{ formatMiddleValue(column.key, row[column.key]) }}
+                      </span>
+                      <span v-else>{{ formatMiddleValue(column.key, row[column.key]) }}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="!selectedMiddleRows.length" class="empty-text middle-empty">没有符合筛选条件的数据</p>
+            </div>
+          </template>
+
+          <p v-else class="empty-text">暂无中台表数据</p>
+        </section>
       </section>
 
       <section v-else-if="activePage === 'deposit'" class="card form-card">
@@ -667,8 +792,9 @@
               <label>
                 <span>权限</span>
                 <select v-model="accountForm.permission">
-                  <option value="personnel">工作人员</option>
-                  <option value="administrator">管理员</option>
+                  <option v-for="option in permissionOptions" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
                 </select>
               </label>
             </div>
@@ -728,6 +854,94 @@
 
         <p v-if="accountStatusText" class="status-text">{{ accountStatusText }}</p>
         <p v-if="accountErrorText" class="error-text">{{ accountErrorText }}</p>
+      </section>
+
+      <section v-else-if="activePage === 'tableManagement'" class="account-page">
+        <header class="section-title-row">
+          <div>
+            <h1>表格管理</h1>
+            <p>配置哪些数据库表显示在中台，以及每张表显示哪些字段。</p>
+          </div>
+          <button class="secondary refresh-button" type="button" :disabled="isTableConfigLoading" @click="loadTableManagement">
+            刷新
+          </button>
+        </header>
+
+        <div v-if="isTableConfigLoading" class="card account-create-card">
+          <p class="empty-text">正在读取表格配置...</p>
+        </div>
+
+        <div v-else class="table-management-layout">
+          <aside class="table-management-sidebar">
+            <button
+              v-for="table in tableConfigItems"
+              :key="table.tableName"
+              class="middle-table-tab"
+              :class="{ active: activeTableConfigName === table.tableName }"
+              type="button"
+              @click="selectTableConfig(table.tableName)"
+            >
+              <span class="table-icon">×</span>
+              <span>{{ table.tableLabel || table.tableName }}</span>
+              <strong v-if="table.isVisible">显示</strong>
+            </button>
+          </aside>
+
+          <section v-if="selectedTableConfig" class="card table-management-panel">
+            <header class="table-config-header">
+              <div>
+                <h2>{{ selectedTableConfig.tableLabel || selectedTableConfig.tableName }}</h2>
+                <p>{{ selectedTableConfig.tableName }} · {{ selectedTableConfig.columns.length }} 个字段</p>
+              </div>
+              <label class="toggle-line">
+                <input v-model="selectedTableConfig.isVisible" type="checkbox" />
+                <span>在中台显示</span>
+              </label>
+            </header>
+
+            <div class="row">
+              <label>
+                <span>中台显示名称</span>
+                <input v-model="selectedTableConfig.tableLabel" />
+              </label>
+              <label>
+                <span>显示排序</span>
+                <input v-model.number="selectedTableConfig.sortOrder" type="number" min="0" />
+              </label>
+            </div>
+
+            <div class="field-picker-header">
+              <strong>显示字段</strong>
+              <div class="field-picker-actions">
+                <button class="secondary tool-button" type="button" @click="selectAllTableFields(selectedTableConfig)">全选</button>
+                <button class="secondary tool-button" type="button" @click="clearTableFields(selectedTableConfig)">清空</button>
+              </div>
+            </div>
+
+            <div class="field-picker-grid">
+              <label v-for="column in selectedTableConfig.columns" :key="column.key" class="field-check">
+                <input
+                  :checked="selectedTableConfig.visibleFields.includes(column.key)"
+                  type="checkbox"
+                  @change="toggleTableField(selectedTableConfig, column.key)"
+                />
+                <span>{{ column.label }}</span>
+                <small>{{ column.key }}</small>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" :disabled="isTableConfigSaving" @click="saveTableManagement">
+                {{ isTableConfigSaving ? '保存中' : '保存配置' }}
+              </button>
+            </div>
+          </section>
+
+          <p v-else class="empty-text">暂无可配置表</p>
+        </div>
+
+        <p v-if="tableConfigStatusText" class="status-text">{{ tableConfigStatusText }}</p>
+        <p v-if="tableConfigErrorText" class="error-text">{{ tableConfigErrorText }}</p>
       </section>
 
       <section v-else-if="activePage === 'push'" class="account-page">
@@ -795,6 +1009,8 @@
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { pageRoutes } from './router';
 import orangeLogo from './assets/logo.webp';
 import topLogo from './assets/top-logo.webp';
 
@@ -883,9 +1099,17 @@ const statementForm = reactive({
 
 const DEFAULT_PICKUP_DROPOFF_METHOD = '昆明 · 到店取车';
 const STORED_USER_KEY = 'mango_finance_user';
+const permissionOptions = [
+  { value: 'finance', label: '财务' },
+  { value: 'sales', label: '销售' },
+  { value: 'fleet_manager', label: '车队长' },
+  { value: 'administrator', label: '管理员' }
+];
 
 const currentUser = ref(readStoredUser());
-const activePage = ref('home');
+const route = useRoute();
+const router = useRouter();
+const activePage = computed(() => route.meta?.page || 'home');
 const isLoginLoading = ref(false);
 const loginError = ref('');
 const loginForm = reactive({
@@ -897,7 +1121,7 @@ const accountForm = reactive({
   displayName: '',
   contact: '',
   password: '',
-  permission: 'personnel'
+  permission: 'finance'
 });
 const pushConfig = reactive({
   webhook: ''
@@ -920,6 +1144,19 @@ const historyOpenDates = reactive({});
 const healthStatus = ref(null);
 const isHealthLoading = ref(false);
 const healthErrorText = ref('');
+const middleTables = ref([]);
+const activeMiddleTable = ref('cw_car');
+const isMiddleLoading = ref(false);
+const middleErrorText = ref('');
+const middleSearchText = ref('');
+const middleStatusFilter = ref('');
+const middleSourceFilter = ref('');
+const tableConfigItems = ref([]);
+const activeTableConfigName = ref('');
+const isTableConfigLoading = ref(false);
+const isTableConfigSaving = ref(false);
+const tableConfigStatusText = ref('');
+const tableConfigErrorText = ref('');
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -956,6 +1193,52 @@ const progressLogoStyle = computed(() => ({
 
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
+const selectedMiddleTable = computed(() =>
+  middleTables.value.find(table => table.key === activeMiddleTable.value) || middleTables.value[0] || null
+);
+const selectedTableConfig = computed(() =>
+  tableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || tableConfigItems.value[0] || null
+);
+const selectedMiddleRows = computed(() => {
+  const table = selectedMiddleTable.value;
+  if (!table) return [];
+
+  const keyword = middleSearchText.value.trim().toLowerCase();
+  return table.rows.filter((row) => {
+    if (middleStatusFilter.value && row.vehicle_status !== middleStatusFilter.value) return false;
+    if (middleSourceFilter.value && row.source !== middleSourceFilter.value) return false;
+    if (!keyword) return true;
+
+    return [
+      row.vehicle_record_id,
+      row.vehicle_id,
+      row.plate_number,
+      row.model_name,
+      row.vehicle_category,
+      row.vehicle_status,
+      row.source,
+      row.owner_name
+    ].some(value => String(value || '').toLowerCase().includes(keyword));
+  });
+});
+const middleStatusOptions = computed(() => getUniqueMiddleValues('vehicle_status'));
+const middleSourceOptions = computed(() => getUniqueMiddleValues('source'));
+const middleDashboardCards = computed(() => {
+  const rows = selectedMiddleTable.value?.rows || [];
+  const countBy = (key, value) => rows.filter(row => row[key] === value).length;
+  const validRentRows = rows.filter(row => Number(row.daily_rent_price));
+  const totalDailyRent = validRentRows.reduce((sum, row) => sum + Number(row.daily_rent_price || 0), 0);
+  const averageDailyRent = validRentRows.length ? Math.round(totalDailyRent / validRentRows.length) : 0;
+
+  return [
+    { key: 'total', label: '车辆总数', value: rows.length, detail: '车型参数表记录' },
+    { key: 'inStock', label: '在库车辆', value: countBy('vehicle_status', '在库'), detail: '可关注可用车辆' },
+    { key: 'out', label: '出车车辆', value: countBy('vehicle_status', '出车'), detail: '当前业务占用' },
+    { key: 'maintenance', label: '维修/备用', value: countBy('vehicle_status', '维修中') + countBy('vehicle_status', '备用/不上架'), detail: '暂不正常上架' },
+    { key: 'partner', label: '同行/挂靠', value: countBy('source', '同行') + countBy('source', '挂靠'), detail: '合作车辆来源' },
+    { key: 'avgRent', label: '平均日租', value: averageDailyRent ? `¥${averageDailyRent.toLocaleString('zh-CN')}` : '-', detail: '按已填日租计算' }
+  ];
+});
 
 const healthItems = computed(() => {
   const checks = healthStatus.value?.checks || {};
@@ -1047,17 +1330,29 @@ watch(activePage, (value) => {
     loadHealthStatus();
   }
 
+  if (value === 'middle') {
+    loadMiddlePlatform();
+  }
+
   if (value === 'accounts') {
     if (!isAdministrator.value) {
-      activePage.value = 'home';
+      navigatePage('home');
       return;
     }
     loadUsers();
   }
 
+  if (value === 'tableManagement') {
+    if (!isAdministrator.value) {
+      navigatePage('home');
+      return;
+    }
+    loadTableManagement();
+  }
+
   if (value === 'push') {
     if (!isAdministrator.value) {
-      activePage.value = 'home';
+      navigatePage('home');
       return;
     }
     loadPushConfig();
@@ -1066,7 +1361,7 @@ watch(activePage, (value) => {
   if (value === 'history') {
     loadHistoryImages();
   }
-});
+}, { immediate: true });
 
 watch(currentUser, (value) => {
   if (value?.permission === 'administrator' && activePage.value === 'home') {
@@ -1076,6 +1371,95 @@ watch(currentUser, (value) => {
     healthErrorText.value = '';
   }
 });
+
+function navigatePage(page) {
+  const target = pageRoutes[page] || pageRoutes.home;
+  if (route.path !== target) {
+    router.push(target);
+  }
+}
+
+function selectMiddleTable(key) {
+  activeMiddleTable.value = key;
+  clearMiddleFilters();
+}
+
+async function loadMiddlePlatform() {
+  middleErrorText.value = '';
+  isMiddleLoading.value = true;
+
+  try {
+    const response = await fetch('/api/middle-platform/tables');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取中台数据失败');
+    middleTables.value = data.tables || [];
+    if (!middleTables.value.some(table => table.key === activeMiddleTable.value)) {
+      activeMiddleTable.value = middleTables.value[0]?.key || 'cw_car';
+    }
+  } catch (error) {
+    middleErrorText.value = error?.message || String(error);
+  } finally {
+    isMiddleLoading.value = false;
+  }
+}
+
+function clearMiddleFilters() {
+  middleSearchText.value = '';
+  middleStatusFilter.value = '';
+  middleSourceFilter.value = '';
+}
+
+function getUniqueMiddleValues(key) {
+  const rows = selectedMiddleTable.value?.rows || [];
+  return [...new Set(rows.map(row => row[key]).filter(Boolean))].sort((a, b) =>
+    String(a).localeCompare(String(b), 'zh-CN')
+  );
+}
+
+function isMiddleTagColumn(key) {
+  return ['vehicle_category', 'recommended_fuel', 'vehicle_status', 'source', 'key_check', 'spring_festival_available'].includes(key);
+}
+
+function middleTagClass(key, value) {
+  const raw = String(value || '');
+  if (key === 'vehicle_category') {
+    if (raw === '超跑') return 'red';
+    if (raw === '性能车') return 'yellow';
+    if (raw === '新能源') return 'cyan';
+    if (raw.includes('SUV')) return 'gray';
+    if (raw.includes('轿车')) return 'blue';
+    return 'green';
+  }
+  if (key === 'recommended_fuel') {
+    if (raw === '新能源') return 'cyan';
+    if (raw === '98') return 'red';
+    if (raw === '95') return 'orange';
+    return 'gray';
+  }
+  if (key === 'vehicle_status') {
+    if (raw === '在库') return 'green';
+    if (raw === '出车') return 'orange';
+    if (raw === '维修中') return 'purple';
+    if (raw === '停运' || raw === '已出售') return 'red';
+    return 'blue';
+  }
+  if (key === 'source') {
+    if (raw === '自由') return 'green';
+    if (raw === '挂靠') return 'blue';
+    if (raw === '同行') return 'orange';
+    if (raw === '抵押') return 'purple';
+    return 'gray';
+  }
+  return raw === '是' || raw === '在店' || raw === '在' ? 'green' : 'blue';
+}
+
+function formatMiddleValue(key, value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (['daily_rent_price', 'over_mileage_price', 'purchase_price', 'standard_cost'].includes(key)) {
+    return `¥${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
+  }
+  return String(value);
+}
 
 function getPayload() {
   return {
@@ -1133,6 +1517,7 @@ async function login() {
 function logout() {
   localStorage.removeItem(STORED_USER_KEY);
   currentUser.value = null;
+  navigatePage('home');
   clearForm();
   clearBalanceForm();
   clearStatementForm();
@@ -1509,6 +1894,73 @@ async function loadUsers() {
   }
 }
 
+async function loadTableManagement() {
+  tableConfigErrorText.value = '';
+  tableConfigStatusText.value = '';
+  isTableConfigLoading.value = true;
+
+  try {
+    const response = await fetch('/api/table-management');
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '读取表格配置失败');
+    tableConfigItems.value = (data.tables || []).map(table => ({
+      ...table,
+      visibleFields: Array.isArray(table.visibleFields) ? table.visibleFields : []
+    }));
+    if (!tableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
+      activeTableConfigName.value = tableConfigItems.value[0]?.tableName || '';
+    }
+  } catch (error) {
+    tableConfigErrorText.value = error?.message || String(error);
+  } finally {
+    isTableConfigLoading.value = false;
+  }
+}
+
+function selectTableConfig(tableName) {
+  activeTableConfigName.value = tableName;
+}
+
+function toggleTableField(table, field) {
+  const fields = new Set(table.visibleFields || []);
+  if (fields.has(field)) {
+    fields.delete(field);
+  } else {
+    fields.add(field);
+  }
+  table.visibleFields = [...fields];
+}
+
+function selectAllTableFields(table) {
+  table.visibleFields = table.columns.map(column => column.key);
+}
+
+function clearTableFields(table) {
+  table.visibleFields = [];
+}
+
+async function saveTableManagement() {
+  tableConfigErrorText.value = '';
+  tableConfigStatusText.value = '';
+  isTableConfigSaving.value = true;
+
+  try {
+    const response = await fetch('/api/table-management', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tables: tableConfigItems.value })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '保存表格配置失败');
+    tableConfigStatusText.value = '表格配置已保存';
+    await loadMiddlePlatform();
+  } catch (error) {
+    tableConfigErrorText.value = error?.message || String(error);
+  } finally {
+    isTableConfigSaving.value = false;
+  }
+}
+
 async function createAccount() {
   accountErrorText.value = '';
   accountStatusText.value = '';
@@ -1527,7 +1979,7 @@ async function createAccount() {
     accountForm.displayName = '';
     accountForm.contact = '';
     accountForm.password = '';
-    accountForm.permission = 'personnel';
+    accountForm.permission = 'finance';
     accountStatusText.value = '账号已添加';
     await loadUsers();
   } catch (error) {
@@ -1604,12 +2056,16 @@ function clearAccountState() {
   accountForm.displayName = '';
   accountForm.contact = '';
   accountForm.password = '';
-  accountForm.permission = 'personnel';
+  accountForm.permission = 'finance';
   accountStatusText.value = '';
   accountErrorText.value = '';
   pushConfig.webhook = '';
   pushConfigStatusText.value = '';
   pushConfigErrorText.value = '';
+  tableConfigItems.value = [];
+  activeTableConfigName.value = '';
+  tableConfigStatusText.value = '';
+  tableConfigErrorText.value = '';
   for (const key of Object.keys(visiblePasswords)) delete visiblePasswords[key];
   for (const key of Object.keys(newPasswords)) delete newPasswords[key];
 }
@@ -1805,7 +2261,7 @@ function formatFileSize(size) {
 }
 
 function permissionLabel(permission) {
-  return permission === 'administrator' ? '管理员' : '工作人员';
+  return permissionOptions.find(option => option.value === permission)?.label || permission;
 }
 
 function receiptTypeLabel(type) {

@@ -50,6 +50,7 @@ const LEGACY_RECEIPT_DIR_NAMES = {
   balance: '尾款单',
   statement: '对帐单'
 };
+const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -69,6 +70,25 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/health') {
       const result = await getHealthStatus();
       sendJson(res, result, result.ok ? 200 : 500);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/middle-platform/tables') {
+      const result = await listMiddlePlatformTables();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/table-management') {
+      const result = await getTableManagementConfig();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/table-management') {
+      const payload = await readJsonBody(req);
+      const result = await saveTableManagementConfig(payload);
+      sendJson(res, result);
       return;
     }
 
@@ -528,6 +548,143 @@ async function listHistoryImages() {
   return { ok: true, groups };
 }
 
+async function listMiddlePlatformTables() {
+  const conn = await createMysqlConnection();
+  try {
+    await ensureTableViewConfigTable(conn);
+    await ensureDefaultTableViewConfig(conn);
+
+    const [configs] = await conn.execute(`
+      SELECT table_name, table_label, visible_fields
+      FROM cw_table_view_config
+      WHERE is_visible = 1
+      ORDER BY sort_order ASC, id ASC
+    `);
+    const schemaTables = await getSchemaTables(conn);
+    const tables = [];
+
+    for (const config of configs) {
+      const schemaTable = schemaTables.find(table => table.tableName === config.table_name);
+      if (!schemaTable) continue;
+
+      const allowedColumns = schemaTable.columns;
+      const configuredFields = parseJsonArray(config.visible_fields);
+      const visibleKeys = configuredFields.length
+        ? configuredFields.filter(field => allowedColumns.some(column => column.key === field))
+        : allowedColumns.map(column => column.key);
+      const columns = allowedColumns.filter(column => visibleKeys.includes(column.key));
+      if (!columns.length) continue;
+
+      const selectSql = columns
+        .map(column => formatSelectColumn(column))
+        .join(', ');
+      const orderSql = buildMiddleTableOrderSql(schemaTable.tableName, allowedColumns);
+      const [rows] = await conn.query(`
+        SELECT ${selectSql}
+        FROM ${escapeIdentifier(schemaTable.tableName)}
+        ${orderSql}
+        LIMIT 500
+      `);
+
+      tables.push({
+        key: schemaTable.tableName,
+        label: config.table_label || schemaTable.tableComment || schemaTable.tableName,
+        databaseName: schemaTable.tableName,
+        role: '',
+        columns,
+        rows
+      });
+    }
+
+    return { ok: true, tables };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function getTableManagementConfig() {
+  const conn = await createMysqlConnection();
+  try {
+    await ensureTableViewConfigTable(conn);
+    await ensureDefaultTableViewConfig(conn);
+    const schemaTables = await getSchemaTables(conn);
+    const [configs] = await conn.execute(`
+      SELECT table_name, table_label, is_visible, visible_fields, sort_order
+      FROM cw_table_view_config
+      ORDER BY sort_order ASC, id ASC
+    `);
+    const configMap = new Map(configs.map(config => [config.table_name, config]));
+
+    const tables = schemaTables.map((table, index) => {
+      const config = configMap.get(table.tableName);
+      const visibleFields = parseJsonArray(config?.visible_fields);
+      return {
+        tableName: table.tableName,
+        tableLabel: config?.table_label || table.tableComment || table.tableName,
+        tableComment: table.tableComment || '',
+        isVisible: Boolean(config?.is_visible),
+        sortOrder: Number(config?.sort_order ?? index + 1),
+        visibleFields: visibleFields.length ? visibleFields : table.columns.map(column => column.key),
+        columns: table.columns
+      };
+    });
+
+    return { ok: true, tables };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function saveTableManagementConfig(payload) {
+  const tables = Array.isArray(payload.tables) ? payload.tables : [];
+  const conn = await createMysqlConnection();
+  try {
+    await ensureTableViewConfigTable(conn);
+    const schemaTables = await getSchemaTables(conn);
+    const schemaMap = new Map(schemaTables.map(table => [table.tableName, table]));
+
+    for (let index = 0; index < tables.length; index += 1) {
+      const item = tables[index];
+      const schemaTable = schemaMap.get(String(item.tableName || ''));
+      if (!schemaTable) continue;
+
+      const allowedFields = new Set(schemaTable.columns.map(column => column.key));
+      const visibleFields = Array.isArray(item.visibleFields)
+        ? item.visibleFields.filter(field => allowedFields.has(field))
+        : [];
+      const tableLabel = String(item.tableLabel || schemaTable.tableComment || schemaTable.tableName).trim();
+      const isVisible = item.isVisible ? 1 : 0;
+      const sortOrder = Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : index + 1;
+
+      await conn.execute(
+        `INSERT INTO cw_table_view_config (
+          table_name,
+          table_label,
+          is_visible,
+          visible_fields,
+          sort_order
+        ) VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+          table_label = VALUES(table_label),
+          is_visible = VALUES(is_visible),
+          visible_fields = VALUES(visible_fields),
+          sort_order = VALUES(sort_order)`,
+        [
+          schemaTable.tableName,
+          tableLabel,
+          isVisible,
+          JSON.stringify(visibleFields),
+          sortOrder
+        ]
+      );
+    }
+
+    return { ok: true };
+  } finally {
+    await conn.end();
+  }
+}
+
 async function loginUser(payload) {
   const username = String(payload.username || '').trim();
   const password = String(payload.password || '');
@@ -596,9 +753,9 @@ async function createUser(payload) {
   const password = String(payload.password || '');
   const displayName = String(payload.displayName || '').trim();
   const contact = String(payload.contact || '').trim();
-  const permission = ['administrator', 'personnel'].includes(payload.permission)
+  const permission = USER_PERMISSIONS.includes(payload.permission)
     ? payload.permission
-    : 'personnel';
+    : 'finance';
 
   if (!username) throw new Error('账号不能为空');
   if (!password) throw new Error('初始密码不能为空');
@@ -815,8 +972,133 @@ async function ensureUserOptionalColumns(conn) {
   }
 
   if (!names.has('permission')) {
-    await conn.execute("ALTER TABLE cw_user ADD COLUMN permission ENUM('administrator','personnel') NOT NULL DEFAULT 'personnel' COMMENT '权限' AFTER status");
+    await conn.execute("ALTER TABLE cw_user ADD COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限' AFTER status");
+    return;
   }
+
+  const permissionColumn = columns.find(column => column.Field === 'permission');
+  const permissionType = String(permissionColumn?.Type || '');
+  const hasAllRoles = USER_PERMISSIONS.every(permission => permissionType.includes(`'${permission}'`));
+  const hasLegacyPersonnel = permissionType.includes("'personnel'");
+
+  if (!hasAllRoles || hasLegacyPersonnel) {
+    await conn.execute("ALTER TABLE cw_user MODIFY COLUMN permission ENUM('administrator','personnel','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'");
+    await conn.execute("UPDATE cw_user SET permission = 'finance' WHERE permission = 'personnel' OR permission IS NULL OR permission = ''");
+    await conn.execute("ALTER TABLE cw_user MODIFY COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'");
+  }
+}
+
+async function ensureTableViewConfigTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_table_view_config (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    table_name VARCHAR(100) NOT NULL COMMENT '数据库表名',
+    table_label VARCHAR(100) NOT NULL DEFAULT '' COMMENT '表中文显示名',
+    is_visible TINYINT NOT NULL DEFAULT 0 COMMENT '是否在中台显示：0不显示，1显示',
+    visible_fields JSON NULL COMMENT '中台显示字段列表',
+    sort_order INT NOT NULL DEFAULT 0 COMMENT '显示排序',
+    UNIQUE KEY uk_table_name (table_name)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='中台表格显示配置'`);
+}
+
+async function ensureDefaultTableViewConfig(conn) {
+  const schemaTables = await getSchemaTables(conn);
+
+  for (let index = 0; index < schemaTables.length; index += 1) {
+    const table = schemaTables[index];
+    await conn.execute(
+      `INSERT IGNORE INTO cw_table_view_config (
+        table_name,
+        table_label,
+        is_visible,
+        visible_fields,
+        sort_order
+      ) VALUES (?, ?, 1, ?, ?)`,
+      [
+        table.tableName,
+        table.tableComment || table.tableName,
+        JSON.stringify(table.columns.map(column => column.key)),
+        index + 1
+      ]
+    );
+  }
+}
+
+async function getSchemaTables(conn) {
+  const [tableRows] = await conn.execute(`
+    SELECT TABLE_NAME AS tableName, TABLE_COMMENT AS tableComment
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_TYPE = 'BASE TABLE'
+      AND TABLE_NAME LIKE 'cw\\_%'
+      AND TABLE_NAME <> 'cw_table_view_config'
+    ORDER BY TABLE_NAME
+  `);
+
+  const [columnRows] = await conn.execute(`
+    SELECT
+      TABLE_NAME AS tableName,
+      COLUMN_NAME AS columnName,
+      COLUMN_COMMENT AS columnComment,
+      DATA_TYPE AS dataType,
+      ORDINAL_POSITION AS ordinalPosition
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME LIKE 'cw\\_%'
+      AND TABLE_NAME <> 'cw_table_view_config'
+    ORDER BY TABLE_NAME, ORDINAL_POSITION
+  `);
+
+  const columnsByTable = new Map();
+  for (const column of columnRows) {
+    if (!columnsByTable.has(column.tableName)) columnsByTable.set(column.tableName, []);
+    columnsByTable.get(column.tableName).push({
+      key: column.columnName,
+      label: column.columnComment || column.columnName,
+      dataType: column.dataType,
+      ordinalPosition: column.ordinalPosition
+    });
+  }
+
+  return tableRows.map(table => ({
+    tableName: table.tableName,
+    tableComment: table.tableComment || '',
+    columns: columnsByTable.get(table.tableName) || []
+  }));
+}
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function formatSelectColumn(column) {
+  const name = escapeIdentifier(column.key);
+  if (['date', 'datetime', 'timestamp'].includes(column.dataType)) {
+    const format = column.dataType === 'date' ? '%Y-%m-%d' : '%Y-%m-%d %H:%i:%s';
+    return `DATE_FORMAT(${name}, '${format}') AS ${name}`;
+  }
+  return name;
+}
+
+function buildMiddleTableOrderSql(tableName, columns) {
+  const columnKeys = new Set(columns.map(column => column.key));
+  if (tableName === 'cw_car' && columnKeys.has('vehicle_id')) {
+    return 'ORDER BY vehicle_id + 0, vehicle_id, plate_number';
+  }
+  if (columnKeys.has('create_time')) return 'ORDER BY create_time DESC';
+  if (columnKeys.has('id')) return 'ORDER BY id DESC';
+  return '';
+}
+
+function escapeIdentifier(value) {
+  return `\`${String(value).replace(/`/g, '``')}\``;
 }
 
 async function ensureStatementTable(conn) {
