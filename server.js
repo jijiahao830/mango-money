@@ -50,6 +50,7 @@ const LEGACY_RECEIPT_DIR_NAMES = {
   balance: '尾款单',
   statement: '对帐单'
 };
+const USER_TABLE = 'cw_ry';
 const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
 
 const MIME_TYPES = {
@@ -280,7 +281,7 @@ async function saveDjdRecord(payload) {
 
   try {
     const [result] = await conn.execute(
-      `INSERT INTO cw_djd (
+      `INSERT INTO tp_djd (
         create_user,
         customer_name,
         customer_id,
@@ -325,7 +326,7 @@ async function saveWkdRecord(payload) {
 
   try {
     const [result] = await conn.execute(
-      `INSERT INTO cw_wkd (
+      `INSERT INTO tp_wkd (
         create_user,
         customer_name,
         customer_id,
@@ -482,7 +483,7 @@ async function saveZdRecord(payload) {
     ].map(value => value === undefined || value === null ? '' : String(value));
 
     const [result] = await conn.execute(
-      `INSERT INTO cw_dzd (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
+      `INSERT INTO tp_dzd (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`,
       values
     );
     return { ok: true, id: result.insertId };
@@ -862,7 +863,7 @@ async function loginUser(payload) {
   try {
     await ensureUserOptionalColumns(conn);
     const [rows] = await conn.execute(
-      'SELECT id, username, display_name AS displayName, permission FROM cw_user WHERE username = ? AND password = ? AND status = 1 LIMIT 1',
+      `SELECT id, username, display_name AS displayName, permission FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND password = ? AND status = 1 LIMIT 1`,
       [username, password]
     );
 
@@ -895,7 +896,7 @@ async function listUsers() {
         display_name AS displayName,
         contact,
         permission
-      FROM cw_user
+      FROM ${escapeIdentifier(USER_TABLE)}
       WHERE status = 1
       ORDER BY id DESC`
     );
@@ -922,13 +923,13 @@ async function createUser(payload) {
   try {
     await ensureUserOptionalColumns(conn);
     const [existing] = await conn.execute(
-      'SELECT id FROM cw_user WHERE username = ? AND status = 1 LIMIT 1',
+      `SELECT id FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND status = 1 LIMIT 1`,
       [username]
     );
     if (existing.length) throw new Error('账号已存在');
 
     const [result] = await conn.execute(
-      `INSERT INTO cw_user (
+      `INSERT INTO ${escapeIdentifier(USER_TABLE)} (
         username,
         password,
         status,
@@ -952,7 +953,7 @@ async function updateUserPassword(id, payload) {
   const conn = await createMysqlConnection();
   try {
     const [result] = await conn.execute(
-      'UPDATE cw_user SET password = ? WHERE id = ? AND status = 1',
+      `UPDATE ${escapeIdentifier(USER_TABLE)} SET password = ? WHERE id = ? AND status = 1`,
       [password, id]
     );
     if (!result.affectedRows) throw new Error('账号不存在或已删除');
@@ -968,7 +969,7 @@ async function deleteUser(id) {
   const conn = await createMysqlConnection();
   try {
     const [result] = await conn.execute(
-      'UPDATE cw_user SET status = 0 WHERE id = ? AND status = 1',
+      `UPDATE ${escapeIdentifier(USER_TABLE)} SET status = 0 WHERE id = ? AND status = 1`,
       [id]
     );
     if (!result.affectedRows) throw new Error('账号不存在或已删除');
@@ -1117,19 +1118,19 @@ async function createMysqlConnection() {
 }
 
 async function ensureUserOptionalColumns(conn) {
-  const [columns] = await conn.execute('SHOW COLUMNS FROM cw_user');
+  const [columns] = await conn.execute(`SHOW COLUMNS FROM ${escapeIdentifier(USER_TABLE)}`);
   const names = new Set(columns.map(column => column.Field));
 
   if (!names.has('display_name')) {
-    await conn.execute("ALTER TABLE cw_user ADD COLUMN display_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '姓名/显示名' AFTER username");
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN display_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '姓名/显示名' AFTER username`);
   }
 
   if (!names.has('contact')) {
-    await conn.execute("ALTER TABLE cw_user ADD COLUMN contact VARCHAR(100) NOT NULL DEFAULT '' COMMENT '联系方式' AFTER display_name");
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN contact VARCHAR(100) NOT NULL DEFAULT '' COMMENT '联系方式' AFTER display_name`);
   }
 
   if (!names.has('permission')) {
-    await conn.execute("ALTER TABLE cw_user ADD COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限' AFTER status");
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限' AFTER status`);
     return;
   }
 
@@ -1139,9 +1140,9 @@ async function ensureUserOptionalColumns(conn) {
   const hasLegacyPersonnel = permissionType.includes("'personnel'");
 
   if (!hasAllRoles || hasLegacyPersonnel) {
-    await conn.execute("ALTER TABLE cw_user MODIFY COLUMN permission ENUM('administrator','personnel','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'");
-    await conn.execute("UPDATE cw_user SET permission = 'finance' WHERE permission = 'personnel' OR permission IS NULL OR permission = ''");
-    await conn.execute("ALTER TABLE cw_user MODIFY COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'");
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} MODIFY COLUMN permission ENUM('administrator','personnel','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'`);
+    await conn.execute(`UPDATE ${escapeIdentifier(USER_TABLE)} SET permission = 'finance' WHERE permission = 'personnel' OR permission IS NULL OR permission = ''`);
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} MODIFY COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'`);
   }
 }
 
@@ -1343,7 +1344,7 @@ function escapeIdentifier(value) {
 }
 
 async function ensureStatementTable(conn) {
-  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_dzd (
+  await conn.execute(`CREATE TABLE IF NOT EXISTS tp_dzd (
     id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     create_user VARCHAR(100) NOT NULL DEFAULT '' COMMENT '创建人员',
