@@ -3,7 +3,6 @@ import { createRouter, createWebHistory } from 'vue-router';
 const pages = [
   ['home', '/home'],
   ['middle', '/middle-platform'],
-  ['financePlatform', '/finance-platform'],
   ['deposit', '/deposit'],
   ['balance', '/balance'],
   ['statement', '/statement'],

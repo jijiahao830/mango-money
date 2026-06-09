@@ -58,14 +58,6 @@
           </button>
           <button
             class="nav-button"
-            :class="{ active: activePage === 'financePlatform' }"
-            type="button"
-            @click="navigatePage('financePlatform')"
-          >
-            财务中台
-          </button>
-          <button
-            class="nav-button"
             :class="{ active: activePage === 'deposit' }"
             type="button"
             @click="navigatePage('deposit')"
@@ -136,7 +128,7 @@
           <header class="section-title-row">
             <div>
               <h1>系统健康</h1>
-              <p>检查当前财务中台运行环境和核心配置。</p>
+              <p>检查当前财务系统运行环境和核心配置。</p>
             </div>
             <button class="secondary refresh-button" type="button" :disabled="isHealthLoading" @click="loadHealthStatus">
               刷新
@@ -296,129 +288,6 @@
           </template>
 
           <p v-else class="empty-text">暂无中台表数据</p>
-        </section>
-      </section>
-
-      <section v-else-if="activePage === 'financePlatform'" class="finance-platform-page">
-        <aside class="finance-module-sidebar" aria-label="财务中台模块">
-          <template v-for="module in financeModules" :key="module.key">
-            <button
-              class="finance-module-tab"
-              :class="{ active: activeFinanceModule === module.key }"
-              type="button"
-              @click="selectFinanceModule(module.key)"
-            >
-              <strong>{{ module.label }}</strong>
-            </button>
-            <div
-              v-if="activeFinanceModule === module.key"
-              class="finance-submenu"
-            >
-              <button
-                v-for="item in selectedFinanceMenuItems"
-                :key="item.key"
-                class="finance-submenu-tab"
-                :class="{ active: activeFinanceSectionKey === item.key }"
-                type="button"
-                @click="selectFinanceSection(item.key)"
-              >
-                {{ item.label }}
-              </button>
-            </div>
-          </template>
-        </aside>
-
-        <section class="finance-module-content">
-          <header class="finance-module-header">
-            <div>
-              <h1>{{ selectedFinanceModule.label }}</h1>
-              <p>{{ selectedFinanceModule.description }}</p>
-            </div>
-          </header>
-
-          <div class="finance-module-grid">
-            <section class="card finance-form-panel">
-              <div class="finance-panel-title">
-                <h2>{{ selectedFinanceSectionTitle }}</h2>
-              </div>
-
-              <div v-if="activeFinanceSectionKey === 'relation'" class="finance-relation-bar">
-                <label v-for="relation in financeRelationFields" :key="relation.key">
-                  <span>{{ relation.label }}</span>
-                  <input
-                    v-model="financeRelationDraft[relation.key]"
-                    :type="relation.type"
-                    :placeholder="relation.placeholder"
-                  />
-                </label>
-              </div>
-
-              <p v-if="isMiddleLoading" class="empty-text">正在加载内容...</p>
-              <p v-else-if="middleErrorText" class="error-text">{{ middleErrorText }}</p>
-
-              <form
-                v-else-if="activeFinanceSectionKey !== 'relation' && selectedFinanceSectionTable"
-                class="finance-business-form"
-                @submit.prevent="saveFinanceDraft"
-              >
-                <details
-                  class="finance-table-section"
-                  open
-                >
-                  <summary>
-                    <strong>{{ selectedFinanceSectionTable.label }}</strong>
-                  </summary>
-
-                  <div class="finance-table-field-grid">
-                    <label
-                      v-for="column in financeTableColumns(selectedFinanceSectionTable)"
-                      :key="`${selectedFinanceSectionTable.key}-${column.key}`"
-                      :class="{ wide: financeFieldType(column) === 'textarea', related: isFinanceRelationColumn(column) }"
-                    >
-                      <span>
-                        {{ column.label }}
-                      </span>
-                      <select
-                        v-if="column.enumValues?.length"
-                        v-model="financeDrafts[selectedFinanceModule.key][selectedFinanceSectionTable.key][column.key]"
-                        :disabled="!column.isEditable"
-                      >
-                        <option value="">请选择</option>
-                        <option v-for="option in column.enumValues" :key="option" :value="option">{{ option }}</option>
-                      </select>
-                      <textarea
-                        v-else-if="financeFieldType(column) === 'textarea'"
-                        v-model="financeDrafts[selectedFinanceModule.key][selectedFinanceSectionTable.key][column.key]"
-                        :disabled="!column.isEditable"
-                        :placeholder="`填写${column.label}`"
-                        rows="4"
-                      ></textarea>
-                      <input
-                        v-else
-                        v-model="financeDrafts[selectedFinanceModule.key][selectedFinanceSectionTable.key][column.key]"
-                        :disabled="!column.isEditable"
-                        :type="financeFieldType(column)"
-                        :placeholder="`填写${column.label}`"
-                      />
-                    </label>
-                  </div>
-                </details>
-                <div class="finance-form-actions">
-                  <button type="submit">保存草稿</button>
-                  <button class="secondary" type="button" @click="clearFinanceDraft">清空</button>
-                </div>
-              </form>
-
-              <div v-else-if="activeFinanceSectionKey === 'relation'" class="finance-form-actions">
-                <button type="button" @click="saveFinanceDraft">保存草稿</button>
-                <button class="secondary" type="button" @click="clearFinanceDraft">清空</button>
-              </div>
-
-              <p v-else class="empty-text">当前小目录暂无可填写内容。</p>
-
-              <p v-if="financeStatusText" class="status-text">{{ financeStatusText }}</p>
-            </section>
-          </div>
         </section>
       </section>
 
@@ -1384,189 +1253,6 @@ const result = reactive({
   type: 'deposit'
 });
 
-const financeModules = [
-  {
-    key: 'customer',
-    label: '客户管理',
-    subtitle: '建档、跟进、成交',
-    owner: '销售 / 财务',
-    formTitle: '客户业务信息',
-    description: '维护客户档案，后续关联订单、单据、资金流水和客户价值统计。',
-    tables: ['cw_khzdab', 'cw_khzjlsb', 'cw_srmxb', 'cw_srdzb', 'cw_ywyyjlsb'],
-    mappingNote: '客户管理页面以客户档案为主，查询时聚合成交、流水、对账和押金流水。',
-    fields: [
-      { key: 'customerNo', label: '客户编号', placeholder: '例如：KH0001' },
-      { key: 'customerName', label: '客户姓名', placeholder: '填写客户姓名' },
-      { key: 'phone', label: '电话', placeholder: '填写联系方式' },
-      { key: 'source', label: '客户来源', type: 'select', options: ['自然到店', '转介绍', '抖音', '小红书', '销售开发', '老客户'] },
-      { key: 'ownerSales', label: '负责销售', placeholder: '填写销售姓名' },
-      { key: 'remark', label: '跟进备注', type: 'textarea', placeholder: '记录客户需求、预算、偏好车型等' }
-    ],
-    steps: ['新增或维护客户档案', '补充客户来源和负责销售', '关联订单和资金流水', '沉淀成交金额、成交次数和最近成交日期']
-  },
-  {
-    key: 'vehicle',
-    label: '车辆管理',
-    subtitle: '档案、状态、成本',
-    owner: '车队长 / 财务',
-    formTitle: '车辆业务信息',
-    description: '维护车辆基础档案和经营状态，关联出车、异常、违章、维修、保险和利润。',
-    tables: ['cw_cxcsb', 'cw_zwclb', 'cw_hcwzqkb', 'cw_clycb'],
-    mappingNote: '车辆管理以 cw_cxcsb 为主，详情页按车辆 ID 或车牌聚合车队和财务数据。',
-    fields: [
-      { key: 'vehicleId', label: '车辆ID', placeholder: '系统生成或手动录入' },
-      { key: 'plateNumber', label: '车牌号', placeholder: '例如：云A00000' },
-      { key: 'modelName', label: '车型名称', placeholder: '例如：奔驰E300' },
-      { key: 'category', label: '车辆分类', type: 'select', options: ['超跑', '新能源', '性能车', '豪华SUV', '豪华轿车', 'MPV', '商务车'] },
-      { key: 'status', label: '车辆状态', type: 'select', options: ['在库', '出车', '维修中', '备用/不上架', '停运', '已出售'] },
-      { key: 'remark', label: '车辆备注', type: 'textarea', placeholder: '记录车辆特殊情况、配置、维修提醒等' }
-    ],
-    steps: ['维护车辆档案和状态', '出车时写入出车交付', '回车后补充违章、异常和公里油量', '汇总维修、折旧、保险和车辆利润']
-  },
-  {
-    key: 'documents',
-    label: '单据中心',
-    subtitle: '定金、尾款、对账',
-    owner: '财务',
-    formTitle: '单据业务信息',
-    description: '把定金单、尾款单、对账单归到同一个订单编号下，形成完整收款凭证链。',
-    tables: ['tp_djd', 'tp_wkd', 'tp_dzd'],
-    mappingNote: '单据中心负责业务入口，图片生成仍走现有定金单、尾款单、对账单功能。',
-    fields: [
-      { key: 'orderId', label: '订单编号', placeholder: '必填，关联三类单据' },
-      { key: 'customerName', label: '客户姓名', placeholder: '填写客户姓名' },
-      { key: 'carModel', label: '车型', placeholder: '填写车型名称' },
-      { key: 'documentType', label: '单据类型', type: 'select', options: ['定金单', '尾款单', '对账单'] },
-      { key: 'amount', label: '本次金额', type: 'number', placeholder: '填写金额' },
-      { key: 'remark', label: '单据备注', type: 'textarea', placeholder: '填写单据说明、推送说明或客户备注' }
-    ],
-    steps: ['输入订单编号', '选择单据类型', '生成图片并保存记录', '下载或推送后记录操作和凭证']
-  },
-  {
-    key: 'cash',
-    label: '资金与押金',
-    subtitle: '流水、对账、退款',
-    owner: '财务',
-    formTitle: '资金业务信息',
-    description: '统一处理收款、退款、押金冻结、押金退还和收入对账。',
-    tables: ['cw_yjglb', 'cw_khzjlsb', 'cw_srmxb', 'cw_srdzb', 'cw_ywyyjlsb'],
-    mappingNote: '资金变化必须保留流水记录，不用覆盖方式修改历史金额。',
-    fields: [
-      { key: 'orderId', label: '订单编号', placeholder: '关联订单' },
-      { key: 'flowType', label: '流水类型', type: 'select', options: ['收款', '退款', '押金收取', '押金退还', '收入对账'] },
-      { key: 'amount', label: '金额', type: 'number', placeholder: '填写金额' },
-      { key: 'payMethod', label: '支付方式', type: 'select', options: ['微信', '支付宝', '银行卡', '现金', '企业转账'] },
-      { key: 'occurDate', label: '发生日期', type: 'date' },
-      { key: 'remark', label: '资金备注', type: 'textarea', placeholder: '记录收退款原因、押金状态、对账说明' }
-    ],
-    steps: ['登记收款或退款', '更新押金状态', '写入资金流水', '进入收入对账和财务汇总']
-  },
-  {
-    key: 'cost',
-    label: '成本费用',
-    subtitle: '维修、保险、报销',
-    owner: '车队长 / 财务',
-    formTitle: '成本费用信息',
-    description: '维护订单成本、车辆成本和公司费用，最终形成成本明细和费用汇总。',
-    tables: ['cw_wxcbb', 'cw_wxbbsqb', 'cw_pjcgb', 'cw_bxxfjlb', 'cw_gpsfkb', 'cw_dccbb', 'cw_djfymxb', 'cw_bcfymxb', 'cw_bxfymxb', 'cw_yyzfbxb', 'cw_jdfktzb', 'cw_swpzb', 'cw_gzbb', 'cw_cbmxb', 'cw_fyhzb'],
-    mappingNote: '成本费用模块会按费用类型把数据写到不同明细表，再进入汇总表。',
-    fields: [
-      { key: 'costType', label: '费用类型', type: 'select', options: ['维修', '配件', '保险', 'GPS', '调车', '代驾', '板车', '运营报销', '酒店', '税务', '工资'] },
-      { key: 'relatedNo', label: '关联订单/车辆', placeholder: '填写订单编号、车辆ID或车牌' },
-      { key: 'amount', label: '费用金额', type: 'number', placeholder: '填写金额' },
-      { key: 'occurDate', label: '发生日期', type: 'date' },
-      { key: 'handler', label: '经办人', placeholder: '填写经办人' },
-      { key: 'remark', label: '费用说明', type: 'textarea', placeholder: '填写费用原因、票据、审批情况' }
-    ],
-    steps: ['选择费用类型', '填写关联订单或车辆', '保存到对应成本明细表', '汇总到成本明细和费用汇总']
-  },
-  {
-    key: 'partner',
-    label: '挂靠与同行',
-    subtitle: '合作、分成、付款',
-    owner: '车队长 / 财务',
-    formTitle: '合作业务信息',
-    description: '管理挂靠车主、挂靠合作、同行付款和自有/挂靠车辆成本利润。',
-    tables: ['cw_gkczb', 'cw_gkhzmxb', 'cw_gkclcblrb', 'cw_zyclcblrb', 'cw_thfksqb'],
-    mappingNote: '挂靠与同行按车主、车辆、订单和结算周期汇总合作收益与应付款。',
-    fields: [
-      { key: 'partnerType', label: '合作类型', type: 'select', options: ['挂靠车主', '同行车辆', '自有车辆', '同行付款'] },
-      { key: 'partnerName', label: '合作方/车主', placeholder: '填写合作方名称' },
-      { key: 'vehicleInfo', label: '车辆信息', placeholder: '填写车牌或车型' },
-      { key: 'settleAmount', label: '结算金额', type: 'number', placeholder: '填写结算金额' },
-      { key: 'settleDate', label: '结算日期', type: 'date' },
-      { key: 'remark', label: '合作备注', type: 'textarea', placeholder: '记录分成规则、付款状态、特殊约定' }
-    ],
-    steps: ['登记合作方和车辆', '记录合作明细和结算金额', '发起同行付款申请', '汇总挂靠或自有车辆利润']
-  },
-  {
-    key: 'reports',
-    label: '报表中心',
-    subtitle: '收入、成本、利润',
-    owner: '管理员 / 财务',
-    formTitle: '报表查询条件',
-    description: '从现有业务表汇总收入、成本、押金、车辆、客户和利润，不直接录入业务数据。',
-    tables: ['cw_ndlrb', 'cw_srmxb', 'cw_srdzb', 'cw_cbmxb', 'cw_fyhzb', 'cw_cxcsb', 'cw_khzdab', 'cw_khzjlsb', 'cw_gkclcblrb', 'cw_zyclcblrb'],
-    mappingNote: '报表中心按查询条件读取现有表，生成经营看板、月报、年报和利润分析。',
-    fields: [
-      { key: 'reportType', label: '报表类型', type: 'select', options: ['收入报表', '成本报表', '利润报表', '车辆报表', '客户报表', '押金报表'] },
-      { key: 'startDate', label: '开始日期', type: 'date' },
-      { key: 'endDate', label: '结束日期', type: 'date' },
-      { key: 'dimension', label: '统计维度', type: 'select', options: ['按日', '按月', '按车辆', '按客户', '按销售', '按费用类型'] },
-      { key: 'keyword', label: '关键词', placeholder: '客户、车辆、订单、经办人' },
-      { key: 'remark', label: '报表备注', type: 'textarea', placeholder: '记录本次报表用途或分析口径' }
-    ],
-    steps: ['选择报表类型和时间范围', '按维度汇总现有表数据', '生成报表和图表', '导出或推送财务日报']
-  }
-];
-
-const activeFinanceModule = ref(financeModules[0].key);
-const activeFinanceSectionKey = ref('relation');
-const financeDrafts = reactive(Object.fromEntries(
-  financeModules.map(module => [module.key, {}])
-));
-const financeRelationDraft = reactive({
-  customerId: '',
-  orderId: '',
-  plateNumber: '',
-  carModel: '',
-  businessDate: '',
-  paymentTime: '',
-  pickupAt: '',
-  dropoffAt: '',
-  handler: ''
-});
-const financeStatusText = ref('');
-const financeRelationFields = [
-  { key: 'customerId', label: '客户编号', type: 'text', placeholder: '填写客户编号' },
-  { key: 'orderId', label: '订单编号', type: 'text', placeholder: '填写订单编号' },
-  { key: 'plateNumber', label: '车牌', type: 'text', placeholder: '填写车牌' },
-  { key: 'carModel', label: '车型', type: 'text', placeholder: '填写车型' },
-  { key: 'businessDate', label: '日期', type: 'date', placeholder: '' },
-  { key: 'paymentTime', label: '付款/收款时间', type: 'datetime-local', placeholder: '' },
-  { key: 'pickupAt', label: '出车时间', type: 'datetime-local', placeholder: '' },
-  { key: 'dropoffAt', label: '回车时间', type: 'datetime-local', placeholder: '' },
-  { key: 'handler', label: '人员/销售', type: 'text', placeholder: '填写经办人或销售' }
-];
-const financeRelationColumnNames = new Set([
-  '客户编号',
-  '订单编号',
-  '车牌',
-  '车牌号',
-  '车牌号码',
-  '车型',
-  '车型名称',
-  '车辆型号',
-  '销售',
-  '人员',
-  '日期',
-  '时间',
-  '付款时间',
-  '收款日期',
-  '出车时间',
-  '回车时间'
-]);
-
 const previewImageStyle = computed(() => ({
   transform: `scale(${scale.value})`
 }));
@@ -1606,35 +1292,6 @@ const tableConfigDirectoryLabel = computed(() =>
 const tableConfigDirectoryCount = computed(() =>
   tableConfigDirectory.value === 'hidden' ? visibleTableConfigItems.value.length : hiddenTableConfigItems.value.length
 );
-const selectedFinanceModule = computed(() =>
-  financeModules.find(module => module.key === activeFinanceModule.value) || financeModules[0]
-);
-const selectedFinanceTables = computed(() =>
-  selectedFinanceModule.value.tables
-    .map(tableName => middleTables.value.find(table => table.key === tableName || table.databaseName === tableName))
-    .filter(Boolean)
-);
-const selectedFinanceMenuItems = computed(() => [
-  { key: 'relation', label: selectedFinanceModule.value.formTitle },
-  ...selectedFinanceTables.value.map(table => ({
-    key: table.key,
-    label: table.label
-  }))
-]);
-const selectedFinanceSectionTable = computed(() =>
-  selectedFinanceTables.value.find(table => table.key === activeFinanceSectionKey.value) || null
-);
-const selectedFinanceAllColumns = computed(() =>
-  selectedFinanceTables.value.flatMap(table => financeTableColumns(table))
-);
-const selectedFinanceSectionTitle = computed(() => {
-  if (activeFinanceSectionKey.value === 'relation') return selectedFinanceModule.value.formTitle;
-  return selectedFinanceSectionTable.value?.label || selectedFinanceModule.value.formTitle;
-});
-const selectedFinanceSectionFieldCount = computed(() => {
-  if (activeFinanceSectionKey.value === 'relation') return financeRelationFields.length;
-  return selectedFinanceSectionTable.value ? financeTableColumns(selectedFinanceSectionTable.value).length : 0;
-});
 const selectedMiddleRows = computed(() => {
   const table = selectedMiddleTable.value;
   if (!table) return [];
@@ -1770,10 +1427,6 @@ watch(activePage, (value) => {
     loadMiddlePlatform();
   }
 
-  if (value === 'financePlatform') {
-    loadMiddlePlatform();
-  }
-
   if (value === 'accounts') {
     if (!isAdministrator.value) {
       navigatePage('home');
@@ -1824,80 +1477,6 @@ function navigatePage(page) {
   if (route.path !== target) {
     router.push(target);
   }
-}
-
-function selectFinanceModule(key) {
-  activeFinanceModule.value = key;
-  activeFinanceSectionKey.value = 'relation';
-  financeStatusText.value = '';
-}
-
-function selectFinanceSection(key) {
-  activeFinanceSectionKey.value = key;
-  financeStatusText.value = '';
-}
-
-function saveFinanceDraft() {
-  const module = selectedFinanceModule.value;
-  if (activeFinanceSectionKey.value === 'relation') {
-    financeStatusText.value = `已保存「${module.formTitle}」草稿。`;
-    return;
-  }
-  const table = selectedFinanceSectionTable.value;
-  if (!table) {
-    financeStatusText.value = '当前小目录没有可保存的数据表';
-    return;
-  }
-  financeStatusText.value = `已保存「${table.label}」草稿。`;
-}
-
-function clearFinanceDraft() {
-  if (activeFinanceSectionKey.value === 'relation') {
-    for (const key of Object.keys(financeRelationDraft)) {
-      financeRelationDraft[key] = '';
-    }
-  } else {
-    const tableDraft = financeDrafts[selectedFinanceModule.value.key]?.[activeFinanceSectionKey.value] || {};
-    for (const key of Object.keys(tableDraft)) {
-      tableDraft[key] = '';
-    }
-  }
-  financeStatusText.value = '已清空当前小目录填写内容';
-}
-
-function financeTableColumns(table) {
-  const systemFields = new Set(['id', 'create_time', 'update_time']);
-  const columns = (table?.columns || []).filter(column => !systemFields.has(column.key));
-  const moduleKey = selectedFinanceModule.value.key;
-  if (!financeDrafts[moduleKey]) {
-    financeDrafts[moduleKey] = {};
-  }
-  if (table?.key && !financeDrafts[moduleKey][table.key]) {
-    financeDrafts[moduleKey][table.key] = {};
-  }
-  for (const column of columns) {
-    if (table?.key && !(column.key in financeDrafts[moduleKey][table.key])) {
-      financeDrafts[moduleKey][table.key][column.key] = '';
-    }
-  }
-  return columns;
-}
-
-function isFinanceRelationColumn(column) {
-  const label = String(column.label || '');
-  const key = String(column.key || '').toLowerCase();
-  if (financeRelationColumnNames.has(label)) return true;
-  return ['customer', 'order', 'plate', 'vehicle', 'model', 'date', 'time', 'handler', 'sales'].some(token => key.includes(token));
-}
-
-function financeFieldType(column) {
-  const key = String(column.key || '').toLowerCase();
-  const type = String(column.type || column.dataType || '').toLowerCase();
-  if (type.includes('text') || key.includes('remark') || key.includes('note') || key.includes('description')) return 'textarea';
-  if (type.includes('date') && !type.includes('time')) return 'date';
-  if (type.includes('datetime') || type.includes('timestamp') || key.includes('time')) return 'datetime-local';
-  if (type.includes('int') || type.includes('decimal') || type.includes('float') || type.includes('double')) return 'number';
-  return 'text';
 }
 
 function selectMiddleTable(key) {
