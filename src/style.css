@@ -245,20 +245,6 @@ h1 {
   background: #ecfdf5;
 }
 
-.table-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  border: 1px solid #9ca3af;
-  border-radius: 3px;
-  color: #6b7280;
-  font-size: 13px;
-  line-height: 1;
-}
-
 .middle-content {
   min-width: 0;
   padding: 14px;
@@ -1199,6 +1185,17 @@ hr {
   color: #047857;
   background: #d1fae5;
   font-size: 12px;
+}
+
+.table-management-sidebar .table-directory-tab {
+  margin-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.28);
+  color: #475569;
+}
+
+.table-management-sidebar .table-directory-tab strong {
+  color: #475569;
+  background: #e2e8f0;
 }
 
 .table-management-panel {

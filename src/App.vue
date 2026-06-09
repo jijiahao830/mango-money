@@ -1025,16 +1025,23 @@
         <div v-else class="table-management-layout">
           <aside class="table-management-sidebar">
             <button
-              v-for="table in tableConfigItems"
+              v-for="table in displayedTableConfigItems"
               :key="table.tableName"
               class="middle-table-tab"
               :class="{ active: activeTableConfigName === table.tableName }"
               type="button"
               @click="selectTableConfig(table.tableName)"
             >
-              <span class="table-icon">×</span>
               <span>{{ table.tableLabel || table.tableName }}</span>
               <strong v-if="table.isVisible">显示</strong>
+            </button>
+            <button
+              class="middle-table-tab table-directory-tab"
+              type="button"
+              @click="toggleTableConfigDirectory"
+            >
+              <span>{{ tableConfigDirectoryLabel }}</span>
+              <strong>{{ tableConfigDirectoryCount }}</strong>
             </button>
           </aside>
 
@@ -1056,7 +1063,7 @@
                 <input v-model="selectedTableConfig.tableLabel" />
               </label>
               <label>
-                <span>显示排序</span>
+                <span>显示排序（数字越小，表格越靠前，0最小）</span>
                 <input v-model.number="selectedTableConfig.sortOrder" type="number" min="0" />
               </label>
             </div>
@@ -1341,6 +1348,7 @@ const middleSelectedRowKey = ref('');
 let middleDraftRowIndex = 0;
 const tableConfigItems = ref([]);
 const activeTableConfigName = ref('');
+const tableConfigDirectory = ref('visible');
 const isTableConfigLoading = ref(false);
 const isTableConfigSaving = ref(false);
 const tableConfigStatusText = ref('');
@@ -1572,7 +1580,18 @@ const middleDirtyCount = computed(() => {
   return Object.keys(middleDirtyRows).length + Object.keys(middlePendingDeletes).length + newRows;
 });
 const selectedTableConfig = computed(() =>
-  tableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || tableConfigItems.value[0] || null
+  displayedTableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || displayedTableConfigItems.value[0] || null
+);
+const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
+const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
+const displayedTableConfigItems = computed(() =>
+  tableConfigDirectory.value === 'hidden' ? hiddenTableConfigItems.value : visibleTableConfigItems.value
+);
+const tableConfigDirectoryLabel = computed(() =>
+  tableConfigDirectory.value === 'hidden' ? '显示表格' : '隐藏表格'
+);
+const tableConfigDirectoryCount = computed(() =>
+  tableConfigDirectory.value === 'hidden' ? visibleTableConfigItems.value.length : hiddenTableConfigItems.value.length
 );
 const selectedFinanceModule = computed(() =>
   financeModules.find(module => module.key === activeFinanceModule.value) || financeModules[0]
@@ -2647,8 +2666,9 @@ async function loadTableManagement() {
       ...table,
       visibleFields: Array.isArray(table.visibleFields) ? table.visibleFields : []
     }));
-    if (!tableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
-      activeTableConfigName.value = tableConfigItems.value[0]?.tableName || '';
+    tableConfigDirectory.value = 'visible';
+    if (!displayedTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
+      activeTableConfigName.value = displayedTableConfigItems.value[0]?.tableName || '';
     }
   } catch (error) {
     tableConfigErrorText.value = error?.message || String(error);
@@ -2659,6 +2679,20 @@ async function loadTableManagement() {
 
 function selectTableConfig(tableName) {
   activeTableConfigName.value = tableName;
+}
+
+function sortTableConfigItems(tables) {
+  return [...tables].sort((a, b) => {
+    const sortA = Number.isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+    const sortB = Number.isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+    if (sortA !== sortB) return sortA - sortB;
+    return String(a.tableName || '').localeCompare(String(b.tableName || ''));
+  });
+}
+
+function toggleTableConfigDirectory() {
+  tableConfigDirectory.value = tableConfigDirectory.value === 'hidden' ? 'visible' : 'hidden';
+  activeTableConfigName.value = displayedTableConfigItems.value[0]?.tableName || '';
 }
 
 function toggleTableField(table, field) {
