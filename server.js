@@ -52,6 +52,7 @@ const LEGACY_RECEIPT_DIR_NAMES = {
 };
 const USER_TABLE = 'cw_ry';
 const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
+const PASSWORD_ENCRYPTION_PREFIX = 'aes-ecb:';
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -862,9 +863,10 @@ async function loginUser(payload) {
 
   try {
     await ensureUserOptionalColumns(conn);
+    const encryptedPassword = await encryptUserPassword(password);
     const [rows] = await conn.execute(
       `SELECT id, username, display_name AS displayName, permission FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND password = ? AND status = 1 LIMIT 1`,
-      [username, password]
+      [username, encryptedPassword]
     );
 
     if (!rows.length) {
@@ -900,7 +902,13 @@ async function listUsers() {
       WHERE status = 1
       ORDER BY id DESC`
     );
-    return { ok: true, users: rows };
+    return {
+      ok: true,
+      users: await Promise.all(rows.map(async user => ({
+        ...user,
+        password: await decryptUserPassword(user.password)
+      })))
+    };
   } finally {
     await conn.end();
   }
@@ -918,6 +926,7 @@ async function createUser(payload) {
   if (!username) throw new Error('账号不能为空');
   if (!password) throw new Error('初始密码不能为空');
   if (password.length < 6) throw new Error('初始密码至少 6 位');
+  const encryptedPassword = await encryptUserPassword(password);
 
   const conn = await createMysqlConnection();
   try {
@@ -937,7 +946,7 @@ async function createUser(payload) {
         contact,
         permission
       ) VALUES (?, ?, 1, ?, ?, ?)`,
-      [username, password, displayName, contact, permission]
+      [username, encryptedPassword, displayName, contact, permission]
     );
     return { ok: true, id: result.insertId };
   } finally {
@@ -949,18 +958,56 @@ async function updateUserPassword(id, payload) {
   const password = String(payload.password || '');
   if (!id) throw new Error('账号 ID 无效');
   if (!password) throw new Error('新密码不能为空');
+  const encryptedPassword = await encryptUserPassword(password);
 
   const conn = await createMysqlConnection();
   try {
     const [result] = await conn.execute(
       `UPDATE ${escapeIdentifier(USER_TABLE)} SET password = ? WHERE id = ? AND status = 1`,
-      [password, id]
+      [encryptedPassword, id]
     );
     if (!result.affectedRows) throw new Error('账号不存在或已删除');
     return { ok: true };
   } finally {
     await conn.end();
   }
+}
+
+async function getPasswordEncryptionConfig() {
+  const config = await readAppConfig();
+  const encryption = config.passwordEncryption || {};
+  return {
+    algorithm: encryption.algorithm || 'aes-128-ecb',
+    padding: encryption.padding || 'pkcs7',
+    key: encryption.key || ''
+  };
+}
+
+async function encryptUserPassword(password) {
+  const encryption = await getPasswordEncryptionConfig();
+  const key = Buffer.from(encryption.key, 'utf8');
+  const cipher = crypto.createCipheriv(encryption.algorithm, key, null);
+  cipher.setAutoPadding(true);
+  const encrypted = Buffer.concat([
+    cipher.update(String(password), 'utf8'),
+    cipher.final()
+  ]);
+  return `${PASSWORD_ENCRYPTION_PREFIX}${encrypted.toString('base64')}`;
+}
+
+async function decryptUserPassword(password) {
+  const value = String(password || '');
+  if (!value.startsWith(PASSWORD_ENCRYPTION_PREFIX)) return value;
+
+  const encryption = await getPasswordEncryptionConfig();
+  const key = Buffer.from(encryption.key, 'utf8');
+  const encrypted = Buffer.from(value.slice(PASSWORD_ENCRYPTION_PREFIX.length), 'base64');
+  const decipher = crypto.createDecipheriv(encryption.algorithm, key, null);
+  decipher.setAutoPadding(true);
+  return Buffer.concat([
+    decipher.update(encrypted),
+    decipher.final()
+  ]).toString('utf8');
 }
 
 async function deleteUser(id) {
