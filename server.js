@@ -1236,7 +1236,7 @@ async function getSchemaTables(conn) {
     FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_TYPE = 'BASE TABLE'
-      AND TABLE_NAME LIKE 'cw\\_%'
+      AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
       AND TABLE_NAME <> 'cw_table_view_config'
     ORDER BY TABLE_NAME
   `);
@@ -1254,7 +1254,7 @@ async function getSchemaTables(conn) {
       ORDINAL_POSITION AS ordinalPosition
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME LIKE 'cw\\_%'
+      AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
       AND TABLE_NAME <> 'cw_table_view_config'
     ORDER BY TABLE_NAME, ORDINAL_POSITION
   `);

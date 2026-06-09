@@ -1024,8 +1024,12 @@
 
         <div v-else class="table-management-layout">
           <aside class="table-management-sidebar">
+            <label class="table-sidebar-search">
+              <span>搜索表格</span>
+              <input v-model="tableConfigSearchText" placeholder="输入表名或显示名" />
+            </label>
             <button
-              v-for="table in displayedTableConfigItems"
+              v-for="table in filteredTableConfigItems"
               :key="table.tableName"
               class="middle-table-tab"
               :class="{ active: activeTableConfigName === table.tableName }"
@@ -1349,6 +1353,7 @@ let middleDraftRowIndex = 0;
 const tableConfigItems = ref([]);
 const activeTableConfigName = ref('');
 const tableConfigDirectory = ref('visible');
+const tableConfigSearchText = ref('');
 const isTableConfigLoading = ref(false);
 const isTableConfigSaving = ref(false);
 const tableConfigStatusText = ref('');
@@ -1580,13 +1585,21 @@ const middleDirtyCount = computed(() => {
   return Object.keys(middleDirtyRows).length + Object.keys(middlePendingDeletes).length + newRows;
 });
 const selectedTableConfig = computed(() =>
-  displayedTableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || displayedTableConfigItems.value[0] || null
+  filteredTableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || filteredTableConfigItems.value[0] || null
 );
 const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
 const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
 const displayedTableConfigItems = computed(() =>
   tableConfigDirectory.value === 'hidden' ? hiddenTableConfigItems.value : visibleTableConfigItems.value
 );
+const filteredTableConfigItems = computed(() => {
+  const keyword = tableConfigSearchText.value.trim().toLowerCase();
+  if (!keyword) return displayedTableConfigItems.value;
+  return displayedTableConfigItems.value.filter(table =>
+    [table.tableName, table.tableLabel, table.tableComment]
+      .some(value => String(value || '').toLowerCase().includes(keyword))
+  );
+});
 const tableConfigDirectoryLabel = computed(() =>
   tableConfigDirectory.value === 'hidden' ? '显示表格' : '隐藏表格'
 );
@@ -1789,6 +1802,13 @@ watch(activePage, (value) => {
     loadHistoryImages();
   }
 }, { immediate: true });
+
+watch(filteredTableConfigItems, (items) => {
+  if (activePage.value !== 'tableManagement') return;
+  if (!items.some(table => table.tableName === activeTableConfigName.value)) {
+    activeTableConfigName.value = items[0]?.tableName || '';
+  }
+});
 
 watch(currentUser, (value) => {
   if (value?.permission === 'administrator' && activePage.value === 'home') {
@@ -2667,8 +2687,8 @@ async function loadTableManagement() {
       visibleFields: Array.isArray(table.visibleFields) ? table.visibleFields : []
     }));
     tableConfigDirectory.value = 'visible';
-    if (!displayedTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
-      activeTableConfigName.value = displayedTableConfigItems.value[0]?.tableName || '';
+    if (!filteredTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
+      activeTableConfigName.value = filteredTableConfigItems.value[0]?.tableName || '';
     }
   } catch (error) {
     tableConfigErrorText.value = error?.message || String(error);
@@ -2692,7 +2712,8 @@ function sortTableConfigItems(tables) {
 
 function toggleTableConfigDirectory() {
   tableConfigDirectory.value = tableConfigDirectory.value === 'hidden' ? 'visible' : 'hidden';
-  activeTableConfigName.value = displayedTableConfigItems.value[0]?.tableName || '';
+  tableConfigSearchText.value = '';
+  activeTableConfigName.value = filteredTableConfigItems.value[0]?.tableName || '';
 }
 
 function toggleTableField(table, field) {
