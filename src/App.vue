@@ -1327,7 +1327,7 @@ const healthStatus = ref(null);
 const isHealthLoading = ref(false);
 const healthErrorText = ref('');
 const middleTables = ref([]);
-const activeMiddleTable = ref('cw_car');
+const activeMiddleTable = ref('cw_cxcsb');
 const isMiddleLoading = ref(false);
 const isMiddleSaving = ref(false);
 const middleErrorText = ref('');
@@ -1379,7 +1379,7 @@ const financeModules = [
     owner: '销售 / 财务',
     formTitle: '客户业务信息',
     description: '维护客户档案，后续关联订单、单据、资金流水和客户价值统计。',
-    tables: ['cw_kh', 'cw_khzjls', 'cw_srmx', 'cw_srdz', 'cw_ywyyjls'],
+    tables: ['cw_khzdab', 'cw_khzjlsb', 'cw_srmxb', 'cw_srdzb', 'cw_ywyyjlsb'],
     mappingNote: '客户管理页面以客户档案为主，查询时聚合成交、流水、对账和押金流水。',
     fields: [
       { key: 'customerNo', label: '客户编号', placeholder: '例如：KH0001' },
@@ -1398,8 +1398,8 @@ const financeModules = [
     owner: '车队长 / 财务',
     formTitle: '车辆业务信息',
     description: '维护车辆基础档案和经营状态，关联出车、异常、违章、维修、保险和利润。',
-    tables: ['cw_car', 'cw_ccjfzx', 'cw_zwcl', 'cw_hcwzqk', 'cw_clyc', 'cw_clzjtz'],
-    mappingNote: '车辆管理以 cw_car 为主，详情页按车辆 ID 或车牌聚合车队和财务数据。',
+    tables: ['cw_cxcsb', 'cw_zwclb', 'cw_hcwzqkb', 'cw_clycb'],
+    mappingNote: '车辆管理以 cw_cxcsb 为主，详情页按车辆 ID 或车牌聚合车队和财务数据。',
     fields: [
       { key: 'vehicleId', label: '车辆ID', placeholder: '系统生成或手动录入' },
       { key: 'plateNumber', label: '车牌号', placeholder: '例如：云A00000' },
@@ -1436,7 +1436,7 @@ const financeModules = [
     owner: '财务',
     formTitle: '资金业务信息',
     description: '统一处理收款、退款、押金冻结、押金退还和收入对账。',
-    tables: ['cw_yjgl', 'cw_khzjls', 'cw_srmx', 'cw_srdz', 'cw_ywyyjls'],
+    tables: ['cw_yjglb', 'cw_khzjlsb', 'cw_srmxb', 'cw_srdzb', 'cw_ywyyjlsb'],
     mappingNote: '资金变化必须保留流水记录，不用覆盖方式修改历史金额。',
     fields: [
       { key: 'orderId', label: '订单编号', placeholder: '关联订单' },
@@ -1455,7 +1455,7 @@ const financeModules = [
     owner: '车队长 / 财务',
     formTitle: '成本费用信息',
     description: '维护订单成本、车辆成本和公司费用，最终形成成本明细和费用汇总。',
-    tables: ['cw_wxcb', 'cw_wxbbsq', 'cw_pjcg', 'cw_bxxfjl', 'cw_gpsfk', 'cw_dccb', 'cw_djfymx', 'cw_bcfymx', 'cw_yyzfbx', 'cw_jdfktz', 'cw_swpz', 'cw_gzbb', 'cw_cbmx', 'cw_fyhz'],
+    tables: ['cw_wxcbb', 'cw_wxbbsqb', 'cw_pjcgb', 'cw_bxxfjlb', 'cw_gpsfkb', 'cw_dccbb', 'cw_djfymxb', 'cw_bcfymxb', 'cw_bxfymxb', 'cw_yyzfbxb', 'cw_jdfktzb', 'cw_swpzb', 'cw_gzbb', 'cw_cbmxb', 'cw_fyhzb'],
     mappingNote: '成本费用模块会按费用类型把数据写到不同明细表，再进入汇总表。',
     fields: [
       { key: 'costType', label: '费用类型', type: 'select', options: ['维修', '配件', '保险', 'GPS', '调车', '代驾', '板车', '运营报销', '酒店', '税务', '工资'] },
@@ -1474,7 +1474,7 @@ const financeModules = [
     owner: '车队长 / 财务',
     formTitle: '合作业务信息',
     description: '管理挂靠车主、挂靠合作、同行付款和自有/挂靠车辆成本利润。',
-    tables: ['cw_gkcz', 'cw_gkhz', 'cw_gkhzmx', 'cw_gkclcblr', 'cw_zyclcblr', 'cw_thfksq'],
+    tables: ['cw_gkczb', 'cw_gkhzmxb', 'cw_gkclcblrb', 'cw_zyclcblrb', 'cw_thfksqb'],
     mappingNote: '挂靠与同行按车主、车辆、订单和结算周期汇总合作收益与应付款。',
     fields: [
       { key: 'partnerType', label: '合作类型', type: 'select', options: ['挂靠车主', '同行车辆', '自有车辆', '同行付款'] },
@@ -1493,7 +1493,7 @@ const financeModules = [
     owner: '管理员 / 财务',
     formTitle: '报表查询条件',
     description: '从现有业务表汇总收入、成本、押金、车辆、客户和利润，不直接录入业务数据。',
-    tables: ['cw_ndlr', 'cw_srmx', 'cw_srdz', 'cw_cbmx', 'cw_fyhz', 'cw_car', 'cw_kh', 'cw_khzjls', 'cw_gkclcblr', 'cw_zyclcblr'],
+    tables: ['cw_ndlrb', 'cw_srmxb', 'cw_srdzb', 'cw_cbmxb', 'cw_fyhzb', 'cw_cxcsb', 'cw_khzdab', 'cw_khzjlsb', 'cw_gkclcblrb', 'cw_zyclcblrb'],
     mappingNote: '报表中心按查询条件读取现有表，生成经营看板、月报、年报和利润分析。',
     fields: [
       { key: 'reportType', label: '报表类型', type: 'select', options: ['收入报表', '成本报表', '利润报表', '车辆报表', '客户报表', '押金报表'] },
@@ -1880,7 +1880,7 @@ async function loadMiddlePlatform() {
     if (!response.ok) throw new Error(data.error || '读取中台数据失败');
     middleTables.value = data.tables || [];
     if (!middleTables.value.some(table => table.key === activeMiddleTable.value)) {
-      activeMiddleTable.value = middleTables.value[0]?.key || 'cw_car';
+      activeMiddleTable.value = middleTables.value[0]?.key || 'cw_cxcsb';
     }
     clearMiddleDirtyRows();
   } catch (error) {

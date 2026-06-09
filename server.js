@@ -50,7 +50,7 @@ const LEGACY_RECEIPT_DIR_NAMES = {
   balance: '尾款单',
   statement: '对帐单'
 };
-const USER_TABLE = 'cw_ry';
+const USER_TABLE = 'cw_ryb';
 const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
 const PASSWORD_ENCRYPTION_PREFIX = 'aes-ecb:';
 
@@ -1378,7 +1378,7 @@ function formatSelectColumn(column) {
 
 function buildMiddleTableOrderSql(tableName, columns) {
   const columnKeys = new Set(columns.map(column => column.key));
-  if (tableName === 'cw_car' && columnKeys.has('vehicle_id')) {
+  if (tableName === 'cw_cxcsb' && columnKeys.has('vehicle_id')) {
     return 'ORDER BY vehicle_id + 0, vehicle_id, plate_number';
   }
   if (columnKeys.has('create_time')) return 'ORDER BY create_time DESC';
