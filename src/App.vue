@@ -991,7 +991,7 @@
             <header class="table-config-header">
               <div>
                 <h2>{{ selectedTableConfig.tableLabel || selectedTableConfig.tableName }}</h2>
-                <p>{{ selectedTableConfig.tableName }} · {{ selectedTableConfig.columns.length }} 个字段</p>
+                <p>{{ selectedTableConfig.tableName }} · {{ selectedTableConfigVisibleColumns.length }} 个字段</p>
               </div>
               <label class="toggle-line">
                 <input v-model="selectedTableConfig.isVisible" type="checkbox" />
@@ -1019,7 +1019,7 @@
             </div>
 
             <div class="field-picker-grid">
-              <label v-for="column in selectedTableConfig.columns" :key="column.key" class="field-check">
+              <label v-for="column in selectedTableConfigVisibleColumns" :key="column.key" class="field-check">
                 <input
                   :checked="selectedTableConfig.visibleFields.includes(column.key)"
                   type="checkbox"
@@ -1412,6 +1412,9 @@ const middleDirtyCount = computed(() => {
 });
 const selectedTableConfig = computed(() =>
   filteredTableConfigItems.value.find(table => table.tableName === activeTableConfigName.value) || filteredTableConfigItems.value[0] || null
+);
+const selectedTableConfigVisibleColumns = computed(() =>
+  (selectedTableConfig.value?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key))
 );
 const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
 const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
@@ -2642,7 +2645,9 @@ async function loadTableManagement() {
     if (!response.ok) throw new Error(data.error || '读取表格配置失败');
     tableConfigItems.value = (data.tables || []).map(table => ({
       ...table,
-      visibleFields: Array.isArray(table.visibleFields) ? table.visibleFields : []
+      visibleFields: Array.isArray(table.visibleFields)
+        ? table.visibleFields.filter(field => !isHiddenTableConfigColumn(field))
+        : []
     }));
     tableConfigDirectory.value = 'visible';
     if (!filteredTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
@@ -2685,11 +2690,17 @@ function toggleTableField(table, field) {
 }
 
 function selectAllTableFields(table) {
-  table.visibleFields = table.columns.map(column => column.key);
+  table.visibleFields = table.columns
+    .filter(column => !isHiddenTableConfigColumn(column.key))
+    .map(column => column.key);
 }
 
 function clearTableFields(table) {
   table.visibleFields = [];
+}
+
+function isHiddenTableConfigColumn(key) {
+  return ['id', 'create_time', 'update_time', 'status'].includes(String(key || ''));
 }
 
 function isTableConfigSingleColumn(column) {

@@ -778,13 +778,16 @@ async function getTableManagementConfig() {
     const tables = schemaTables.map((table, index) => {
       const config = configMap.get(table.tableName);
       const visibleFields = parseJsonArray(config?.visible_fields);
+      const configuredVisibleFields = visibleFields.filter(field => !isSystemTableField(field));
       return {
         tableName: table.tableName,
         tableLabel: config?.table_label || table.tableComment || table.tableName,
         tableComment: table.tableComment || '',
         isVisible: Boolean(config?.is_visible),
         sortOrder: Number(config?.sort_order ?? index + 1),
-        visibleFields: visibleFields.length ? visibleFields : table.columns.map(column => column.key),
+        visibleFields: config
+          ? configuredVisibleFields
+          : getConfigurableTableFields(table),
         columns: table.columns
       };
     });
@@ -809,7 +812,7 @@ async function saveTableManagementConfig(payload) {
       const schemaTable = schemaMap.get(String(item.tableName || ''));
       if (!schemaTable) continue;
 
-      const allowedFields = new Set(schemaTable.columns.map(column => column.key));
+      const allowedFields = new Set(getConfigurableTableFields(schemaTable));
       const visibleFields = Array.isArray(item.visibleFields)
         ? item.visibleFields.filter(field => allowedFields.has(field))
         : [];
@@ -1260,11 +1263,21 @@ async function ensureDefaultTableViewConfig(conn) {
       [
         table.tableName,
         table.tableComment || table.tableName,
-        JSON.stringify(table.columns.map(column => column.key)),
+        JSON.stringify(getConfigurableTableFields(table)),
         index + 1
       ]
     );
   }
+}
+
+function isSystemTableField(field) {
+  return ['id', 'create_time', 'update_time', 'status'].includes(String(field || ''));
+}
+
+function getConfigurableTableFields(table) {
+  return (table.columns || [])
+    .map(column => column.key)
+    .filter(field => !isSystemTableField(field));
 }
 
 async function getSchemaTables(conn) {
