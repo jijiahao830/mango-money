@@ -1469,7 +1469,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import * as XLSX from 'xlsx';
 import { pageRoutes } from './router';
 import orangeLogo from './assets/logo.webp';
 import topLogo from './assets/top-logo.webp';
@@ -1585,6 +1584,8 @@ const fieldKindOptions = [
 ];
 const MIDDLE_IMAGE_WEBP_MAX_SIDE = 1600;
 const MIDDLE_IMAGE_WEBP_QUALITY = 0.82;
+const MIDDLE_XLSX_SCRIPT_URL = '/vendor/xlsx.full.min.js';
+let middleXlsxLibraryPromise = null;
 
 const currentUser = ref(readStoredUser());
 const route = useRoute();
@@ -2570,16 +2571,17 @@ function isMiddleExcelFile(file) {
 
 async function readMiddleExcelPreviewRows(file) {
   const href = getMiddleFileHref(file);
+  const xlsx = await loadMiddleXlsxLibrary();
   const buffer = href.startsWith('data:')
     ? dataUrlToArrayBuffer(href)
     : await fetch(href).then(response => {
         if (!response.ok) throw new Error('Excel 文件下载失败');
         return response.arrayBuffer();
       });
-  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const workbook = xlsx.read(buffer, { type: 'array', cellDates: true });
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) return [];
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+  const rows = xlsx.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
     header: 1,
     blankrows: false,
     defval: ''
@@ -2589,6 +2591,28 @@ async function readMiddleExcelPreviewRows(file) {
     .map(row => row.map(cell => formatMiddleExcelCell(cell)));
   const maxColumns = Math.min(50, normalizedRows.reduce((max, row) => Math.max(max, row.length), 0));
   return normalizedRows.map(row => Array.from({ length: maxColumns }, (_, index) => row[index] ?? ''));
+}
+
+function loadMiddleXlsxLibrary() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (middleXlsxLibraryPromise) return middleXlsxLibraryPromise;
+
+  middleXlsxLibraryPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = MIDDLE_XLSX_SCRIPT_URL;
+    script.async = true;
+    script.onload = () => {
+      if (window.XLSX) {
+        resolve(window.XLSX);
+        return;
+      }
+      reject(new Error('Excel 预览组件加载失败'));
+    };
+    script.onerror = () => reject(new Error('Excel 预览组件加载失败'));
+    document.head.appendChild(script);
+  });
+
+  return middleXlsxLibraryPromise;
 }
 
 function dataUrlToArrayBuffer(dataUrl) {
