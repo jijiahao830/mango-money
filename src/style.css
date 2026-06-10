@@ -1130,11 +1130,64 @@ hr {
   font-size: 13px;
 }
 
+.field-check-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.field-check-title span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-config-button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .field-check small {
   grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #94a3b8;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.field-check small em {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: #c2410c;
+  background: #ffedd5;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.field-option-modal {
+  width: min(560px, 100%);
+}
+
+.field-option-modal .modal-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.field-option-editor {
+  margin: 8px 0 16px;
+}
+
+.field-option-editor textarea {
+  min-height: 240px;
+  resize: vertical;
+  line-height: 1.7;
 }
 
 .refresh-button {

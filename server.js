@@ -765,6 +765,7 @@ async function getTableManagementConfig() {
   const conn = await createMysqlConnection();
   try {
     await ensureTableViewConfigTable(conn);
+    await ensureFieldOptionConfigTable(conn);
     await ensureDefaultTableViewConfig(conn);
     const schemaTables = await getSchemaTables(conn);
     const [configs] = await conn.execute(`
@@ -799,6 +800,7 @@ async function saveTableManagementConfig(payload) {
   const conn = await createMysqlConnection();
   try {
     await ensureTableViewConfigTable(conn);
+    await ensureFieldOptionConfigTable(conn);
     const schemaTables = await getSchemaTables(conn);
     const schemaMap = new Map(schemaTables.map(table => [table.tableName, table]));
 
@@ -836,6 +838,36 @@ async function saveTableManagementConfig(payload) {
           sortOrder
         ]
       );
+
+      const schemaColumnsByKey = new Map(schemaTable.columns.map(column => [column.key, column]));
+      const submittedColumns = Array.isArray(item.columns) ? item.columns : [];
+      for (const column of submittedColumns) {
+        const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
+        if (!schemaColumn || !isConfigurableSelectColumn(schemaColumn)) continue;
+        const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
+          ? column.selectOptions
+          : column.enumValues;
+        const options = uniqueStrings(Array.isArray(rawOptions) ? rawOptions : []);
+
+        if (!options.length) {
+          await conn.execute(
+            `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
+            [schemaTable.tableName, schemaColumn.key]
+          );
+          continue;
+        }
+
+        await conn.execute(
+          `INSERT INTO cw_field_option_config (
+            table_name,
+            column_name,
+            options_json
+          ) VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE
+            options_json = VALUES(options_json)`,
+          [schemaTable.tableName, schemaColumn.key, JSON.stringify(options)]
+        );
+      }
     }
 
     return { ok: true };
@@ -1200,6 +1232,18 @@ async function ensureTableViewConfigTable(conn) {
   ) DEFAULT CHARSET=utf8mb4 COMMENT='中台表格显示配置'`);
 }
 
+async function ensureFieldOptionConfigTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_field_option_config (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    table_name VARCHAR(100) NOT NULL COMMENT '数据库表名',
+    column_name VARCHAR(100) NOT NULL COMMENT '数据库字段名',
+    options_json JSON NULL COMMENT '字段选项配置',
+    UNIQUE KEY uk_table_column (table_name, column_name)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='字段选项配置'`);
+}
+
 async function ensureDefaultTableViewConfig(conn) {
   const schemaTables = await getSchemaTables(conn);
 
@@ -1224,13 +1268,14 @@ async function ensureDefaultTableViewConfig(conn) {
 }
 
 async function getSchemaTables(conn) {
+  await ensureFieldOptionConfigTable(conn);
   const [tableRows] = await conn.execute(`
     SELECT TABLE_NAME AS tableName, TABLE_COMMENT AS tableComment
     FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_TYPE = 'BASE TABLE'
       AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
-      AND TABLE_NAME <> 'cw_table_view_config'
+      AND TABLE_NAME NOT IN ('cw_table_view_config', 'cw_field_option_config')
     ORDER BY TABLE_NAME
   `);
 
@@ -1248,28 +1293,32 @@ async function getSchemaTables(conn) {
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
-      AND TABLE_NAME <> 'cw_table_view_config'
+      AND TABLE_NAME NOT IN ('cw_table_view_config', 'cw_field_option_config')
     ORDER BY TABLE_NAME, ORDINAL_POSITION
   `);
 
   const wecomSelectOptions = await getWecomSelectOptionsByDbField();
+  const configuredSelectOptions = await getConfiguredSelectOptionsByDbField(conn);
   const tableCommentByName = new Map(tableRows.map(table => [table.tableName, table.tableComment || '']));
   const columnsByTable = new Map();
   for (const column of columnRows) {
     if (!columnsByTable.has(column.tableName)) columnsByTable.set(column.tableName, []);
-    const enumValues = parseEnumValues(column.columnType);
+    const parsedEnumValues = parseEnumValues(column.columnType);
+    const configuredOptions = configuredSelectOptions.get(`${column.tableName}::${column.columnName}`) || [];
+    const enumValues = parsedEnumValues.length && configuredOptions.length ? configuredOptions : parsedEnumValues;
     const selectOptions = getSelectOptionsForColumn(
       wecomSelectOptions,
       tableCommentByName.get(column.tableName),
       column.columnComment || column.columnName
     );
+    const finalSelectOptions = configuredOptions.length ? configuredOptions : selectOptions;
     columnsByTable.get(column.tableName).push({
       key: column.columnName,
       label: column.columnComment || column.columnName,
       dataType: column.dataType,
       columnType: column.columnType,
       enumValues,
-      selectOptions: selectOptions.length ? selectOptions : enumValues,
+      selectOptions: finalSelectOptions.length ? finalSelectOptions : enumValues,
       isNullable: column.isNullable === 'YES',
       columnKey: column.columnKey || '',
       extra: column.extra || '',
@@ -1319,6 +1368,21 @@ async function getWecomSelectOptionsByDbField() {
   return optionsByField;
 }
 
+async function getConfiguredSelectOptionsByDbField(conn) {
+  await ensureFieldOptionConfigTable(conn);
+  const [rows] = await conn.execute(`
+    SELECT table_name, column_name, options_json
+    FROM cw_field_option_config
+  `);
+  const optionsByField = new Map();
+  for (const row of rows) {
+    const options = uniqueStrings(parseJsonArray(row.options_json));
+    if (!options.length) continue;
+    optionsByField.set(`${row.table_name}::${row.column_name}`, options);
+  }
+  return optionsByField;
+}
+
 function getSelectOptionsForColumn(optionsByField, tableComment, columnComment) {
   const key = `${normalizeSchemaLabel(tableComment || '')}::${normalizeSchemaLabel(columnComment || '')}`;
   return optionsByField.get(key) || [];
@@ -1358,6 +1422,11 @@ function uniqueStrings(values) {
     result.push(text);
   }
   return result;
+}
+
+function isConfigurableSelectColumn(column) {
+  if (column?.enumValues?.length) return true;
+  return column?.dataType === 'json' && Array.isArray(column.selectOptions) && column.selectOptions.length > 0;
 }
 
 function parseEnumValues(columnType) {

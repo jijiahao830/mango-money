@@ -999,8 +999,22 @@
                   type="checkbox"
                   @change="toggleTableField(selectedTableConfig, column.key)"
                 />
-                <span>{{ column.label }}</span>
-                <small>{{ column.key }}</small>
+                <span class="field-check-title">
+                  <span>{{ column.label }}</span>
+                  <button
+                    v-if="isTableConfigSelectableColumn(column)"
+                    class="secondary field-config-button"
+                    type="button"
+                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
+                  >
+                    配置
+                  </button>
+                </span>
+                <small>
+                  {{ column.key }}
+                  <em v-if="isTableConfigSingleColumn(column)">单选</em>
+                  <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
+                </small>
               </label>
             </div>
 
@@ -1047,6 +1061,28 @@
       <section v-else class="workspace-page"></section>
     </section>
   </main>
+
+  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
+    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
+      <header class="modal-header">
+        <div>
+          <h2>{{ fieldOptionConfig.columnLabel }}</h2>
+          <p>{{ fieldOptionConfig.tableLabel }} · {{ fieldOptionConfig.typeLabel }}</p>
+        </div>
+        <button class="secondary tool-button" type="button" @click="closeFieldOptionConfig">关闭</button>
+      </header>
+
+      <label class="field-option-editor">
+        <span>选项值（一行一个）</span>
+        <textarea v-model="fieldOptionConfig.optionText" rows="10" placeholder="每行填写一个选项"></textarea>
+      </label>
+
+      <div class="modal-footer">
+        <button type="button" @click="applyFieldOptionConfig">保存字段配置</button>
+        <button class="secondary" type="button" @click="resetFieldOptionConfig">恢复当前值</button>
+      </div>
+    </section>
+  </div>
 
   <div v-if="isPreviewOpen" class="modal-backdrop" @click.self="closePreview">
     <section class="preview-modal" aria-modal="true" role="dialog">
@@ -1276,6 +1312,16 @@ const isTableConfigLoading = ref(false);
 const isTableConfigSaving = ref(false);
 const tableConfigStatusText = ref('');
 const tableConfigErrorText = ref('');
+const fieldOptionConfig = reactive({
+  isOpen: false,
+  tableName: '',
+  tableLabel: '',
+  columnKey: '',
+  columnLabel: '',
+  typeLabel: '',
+  optionText: '',
+  originalOptionText: ''
+});
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -2546,6 +2592,78 @@ function selectAllTableFields(table) {
 
 function clearTableFields(table) {
   table.visibleFields = [];
+}
+
+function isTableConfigSingleColumn(column) {
+  return Boolean(column?.enumValues?.length);
+}
+
+function isTableConfigMultiColumn(column) {
+  return isMiddleMultiSelectColumn(column);
+}
+
+function isTableConfigSelectableColumn(column) {
+  return isTableConfigSingleColumn(column) || isTableConfigMultiColumn(column);
+}
+
+function getTableConfigColumnOptions(column) {
+  if (isTableConfigMultiColumn(column)) return column.selectOptions || [];
+  if (isTableConfigSingleColumn(column)) return column.enumValues || [];
+  return [];
+}
+
+function openFieldOptionConfig(table, column) {
+  const options = getTableConfigColumnOptions(column);
+  fieldOptionConfig.isOpen = true;
+  fieldOptionConfig.tableName = table.tableName;
+  fieldOptionConfig.tableLabel = table.tableLabel || table.tableName;
+  fieldOptionConfig.columnKey = column.key;
+  fieldOptionConfig.columnLabel = column.label || column.key;
+  fieldOptionConfig.typeLabel = isTableConfigMultiColumn(column) ? '多选字段' : '单选字段';
+  fieldOptionConfig.optionText = options.join('\n');
+  fieldOptionConfig.originalOptionText = fieldOptionConfig.optionText;
+}
+
+function closeFieldOptionConfig() {
+  fieldOptionConfig.isOpen = false;
+}
+
+function resetFieldOptionConfig() {
+  fieldOptionConfig.optionText = fieldOptionConfig.originalOptionText;
+}
+
+function parseFieldOptionText(value) {
+  const result = [];
+  const seen = new Set();
+  String(value || '')
+    .split(/\n/g)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .forEach(item => {
+      if (seen.has(item)) return;
+      seen.add(item);
+      result.push(item);
+    });
+  return result;
+}
+
+function applyFieldOptionConfig() {
+  const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.tableName);
+  const column = table?.columns?.find(item => item.key === fieldOptionConfig.columnKey);
+  if (!table || !column) {
+    closeFieldOptionConfig();
+    return;
+  }
+
+  const options = parseFieldOptionText(fieldOptionConfig.optionText);
+  if (isTableConfigSingleColumn(column)) {
+    column.enumValues = options;
+    column.selectOptions = options;
+  } else if (isTableConfigMultiColumn(column)) {
+    column.selectOptions = options;
+  }
+  tableConfigStatusText.value = '字段配置已更新，点击保存配置后生效';
+  closeFieldOptionConfig();
 }
 
 async function saveTableManagement() {
