@@ -1517,7 +1517,7 @@ async function ensureDefaultTableViewConfig(conn) {
 }
 
 function isSystemTableField(field) {
-  return ['id', 'create_time', 'update_time', 'status'].includes(String(field || ''));
+  return ['create_time', 'update_time', 'status'].includes(String(field || ''));
 }
 
 function getConfigurableTableFields(table) {

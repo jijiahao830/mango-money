@@ -264,22 +264,22 @@
               <table class="middle-data-table">
                 <thead>
                   <tr>
-                    <th class="row-index">#</th>
-                    <th v-for="column in selectedMiddleTable.columns" :key="column.key">
+                    <th class="row-index">ID</th>
+                    <th v-for="column in selectedMiddleDisplayColumns" :key="column.key">
                       {{ column.label }}
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr
-                    v-for="(row, rowIndex) in selectedMiddleRows"
+                    v-for="(row, rowIndex) in pagedMiddleRows"
                     :key="getMiddleRowRenderKey(row, rowIndex)"
                     :data-row-key="getMiddleRowRenderKey(row, rowIndex)"
                     :class="{ selected: middleSelectedRowKey === getMiddleRowRenderKey(row, rowIndex), pendingDelete: row.__pendingDelete }"
                     @click="selectMiddleRow(row, rowIndex)"
                   >
-	                    <td class="row-index">{{ rowIndex + 1 }}</td>
-	                    <td v-for="column in selectedMiddleTable.columns" :key="column.key">
+	                    <td class="row-index">{{ getMiddleRowPrimaryValue(row) || rowIndex + 1 }}</td>
+	                    <td v-for="column in selectedMiddleDisplayColumns" :key="column.key">
 		                      <input
 		                        v-if="isMiddleFormulaColumn(column) && column.isEditable"
 		                        class="middle-cell-input"
@@ -373,6 +373,19 @@
               <div class="middle-row-tools" aria-label="行操作">
                 <button class="middle-row-tool" type="button" title="添加一行" @click="addMiddleRow">+</button>
                 <button class="middle-row-tool" type="button" title="删除一行" @click="removeMiddleRow">−</button>
+                <div class="middle-pagination" aria-label="分页">
+                  <button class="middle-page-arrow" type="button" :disabled="middleCurrentPage <= 1" @click="goMiddlePage(-1)">←</button>
+                  <input
+                    v-model="middlePageInput"
+                    class="middle-page-input"
+                    :aria-label="`当前第 ${middleCurrentPage} 页，共 ${middleTotalPages} 页`"
+                    @focus="middlePageInput = String(middleCurrentPage)"
+                    @keydown.enter.prevent="jumpMiddlePage"
+                    @blur="middlePageInput = middlePageLabel"
+                  />
+                  <span class="middle-page-total">/ {{ middleTotalPages }}</span>
+                  <button class="middle-page-arrow" type="button" :disabled="middleCurrentPage >= middleTotalPages" @click="goMiddlePage(1)">→</button>
+                </div>
               </div>
               <p v-if="!selectedMiddleRows.length" class="empty-text middle-empty">没有符合筛选条件的数据</p>
             </div>
@@ -1605,6 +1618,9 @@ const middleFilterField = ref('');
 const middleFilterValue = ref('');
 const middleFilterValues = ref([]);
 const middleFilterDraftValues = ref([]);
+const middleRowsPerPage = 500;
+const middleCurrentPage = ref(1);
+const middlePageInput = ref('1');
 const isMiddleMultiFilterOpen = ref(false);
 const middleCellMultiSelect = reactive({
   rowKey: '',
@@ -1797,6 +1813,17 @@ const selectedMiddleRows = computed(() => {
       .flatMap(value => parseMiddleFilterValues(value))
       .some(value => String(value || '').toLowerCase().includes(keyword));
   });
+});
+const middleTotalPages = computed(() => Math.max(1, Math.ceil(selectedMiddleRows.value.length / middleRowsPerPage)));
+const middlePageLabel = computed(() => String(middleCurrentPage.value));
+const pagedMiddleRows = computed(() => {
+  const currentPage = Math.min(Math.max(1, middleCurrentPage.value), middleTotalPages.value);
+  const start = (currentPage - 1) * middleRowsPerPage;
+  return selectedMiddleRows.value.slice(start, start + middleRowsPerPage);
+});
+const selectedMiddleDisplayColumns = computed(() => {
+  const primaryKey = getMiddlePrimaryColumn();
+  return (selectedMiddleTable.value?.columns || []).filter(column => column.key !== primaryKey);
 });
 const middleFilterColumns = computed(() =>
   (selectedMiddleTable.value?.columns || [])
@@ -1995,6 +2022,24 @@ watch(middleFilterField, () => {
   middleFilterDraftValues.value = [];
   isMiddleMultiFilterOpen.value = false;
   clearMiddleCellMultiSelect();
+  resetMiddlePagination();
+});
+
+watch([activeMiddleTable, middleSearchText, middleFilterValue], () => {
+  resetMiddlePagination();
+});
+
+watch(middleFilterValues, () => {
+  resetMiddlePagination();
+}, { deep: true });
+
+watch(middleTotalPages, (total) => {
+  if (middleCurrentPage.value > total) middleCurrentPage.value = total;
+  middlePageInput.value = String(middleCurrentPage.value);
+});
+
+watch(middleCurrentPage, (page) => {
+  middlePageInput.value = String(page);
 });
 
 watch(currentUser, (value) => {
@@ -2096,6 +2141,34 @@ function closeMiddleMultiFilter() {
   isMiddleMultiFilterOpen.value = false;
 }
 
+function resetMiddlePagination() {
+  middleCurrentPage.value = 1;
+  middlePageInput.value = '1';
+}
+
+function goMiddlePage(delta) {
+  const nextPage = Math.min(Math.max(1, middleCurrentPage.value + delta), middleTotalPages.value);
+  middleCurrentPage.value = nextPage;
+  scrollMiddleTableToTop();
+}
+
+function jumpMiddlePage() {
+  const page = Number.parseInt(middlePageInput.value, 10);
+  if (!Number.isFinite(page)) {
+    middlePageInput.value = String(middleCurrentPage.value);
+    return;
+  }
+  middleCurrentPage.value = Math.min(Math.max(1, page), middleTotalPages.value);
+  scrollMiddleTableToTop();
+}
+
+async function scrollMiddleTableToTop() {
+  await nextTick();
+  const wrap = middleTableWrapRef.value;
+  if (!wrap) return;
+  wrap.scrollTo({ top: 0, left: wrap.scrollLeft, behavior: 'smooth' });
+}
+
 function normalizeMiddleTables(tables) {
   return tables.map(table => {
     const multiColumns = (table.columns || []).filter(column => isMiddleMultiSelectColumn(column));
@@ -2116,6 +2189,12 @@ function normalizeMiddleTables(tables) {
 
 function getMiddlePrimaryColumn() {
   return selectedMiddleTable.value?.primaryKey || selectedMiddleTable.value?.columns.find(column => column.columnKey === 'PRI')?.key || 'id';
+}
+
+function getMiddleRowPrimaryValue(row) {
+  const primaryKey = getMiddlePrimaryColumn();
+  const value = row?.[primaryKey];
+  return value === undefined || value === null || value === '' ? '' : value;
 }
 
 function getMiddleRowRenderKey(row, rowIndex = 0) {
@@ -2535,6 +2614,7 @@ async function addMiddleRow() {
   middleSelectedRowKey.value = row.__draftId;
   middleSaveStatusText.value = '';
   middleErrorText.value = '';
+  middleCurrentPage.value = middleTotalPages.value;
   await scrollMiddleTableToBottom();
 }
 
@@ -2555,6 +2635,11 @@ async function revealSavedMiddleRow(data) {
   clearMiddleFilters();
   middleSelectedRowKey.value = String(insertedId);
   await nextTick();
+  const rowIndex = selectedMiddleRows.value.findIndex(row => String(getMiddleRowPrimaryValue(row)) === String(insertedId));
+  if (rowIndex >= 0) {
+    middleCurrentPage.value = Math.floor(rowIndex / middleRowsPerPage) + 1;
+    await nextTick();
+  }
   const wrap = middleTableWrapRef.value;
   const selector = `[data-row-key="${CSS.escape(String(insertedId))}"]`;
   const rowElement = wrap?.querySelector?.(selector);
@@ -2564,10 +2649,11 @@ async function revealSavedMiddleRow(data) {
 
 async function removeMiddleRow() {
   const table = selectedMiddleTable.value;
-  if (!table || !selectedMiddleRows.value.length) return;
-  const targetKey = middleSelectedRowKey.value || getMiddleRowRenderKey(selectedMiddleRows.value[selectedMiddleRows.value.length - 1], selectedMiddleRows.value.length - 1);
+  if (!table || !pagedMiddleRows.value.length) return;
+  const fallbackRow = pagedMiddleRows.value[pagedMiddleRows.value.length - 1];
+  const targetKey = middleSelectedRowKey.value || getMiddleRowRenderKey(fallbackRow, pagedMiddleRows.value.length - 1);
   const row = table.rows.find((item, index) => getMiddleRowRenderKey(item, index) === targetKey)
-    || selectedMiddleRows.value[selectedMiddleRows.value.length - 1];
+    || fallbackRow;
   if (!row) return;
 
   const label = row.model_name || row.plate_number || row.order_id || row.username || getMiddleRowRenderKey(row);
@@ -3512,7 +3598,7 @@ function clearTableFields(table) {
 }
 
 function isHiddenTableConfigColumn(key) {
-  return ['id', 'create_time', 'update_time', 'status'].includes(String(key || ''));
+  return ['create_time', 'update_time', 'status'].includes(String(key || ''));
 }
 
 function isTableConfigSingleColumn(column) {

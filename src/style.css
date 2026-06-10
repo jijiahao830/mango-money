@@ -656,6 +656,60 @@ h1 {
   line-height: 1;
 }
 
+.middle-pagination {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: #1f1f1f;
+}
+
+.middle-page-arrow {
+  min-width: 0;
+  width: 26px;
+  height: 26px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  color: #d1d5db;
+  background: transparent;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.middle-page-arrow:hover:not(:disabled) {
+  color: #ffffff;
+  background: #343434;
+}
+
+.middle-page-arrow:disabled {
+  opacity: 0.35;
+}
+
+.middle-page-input {
+  width: 64px;
+  height: 30px;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid #3f3f46;
+  border-radius: 0;
+  color: #ffffff;
+  background: #2b2b2b;
+  font-size: 16px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.middle-page-total {
+  color: #d1d5db;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .health-panel {
   display: flex;
   flex-direction: column;
