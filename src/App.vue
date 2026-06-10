@@ -1040,33 +1040,33 @@
                   type="checkbox"
                   @change="toggleTableField(selectedTableConfig, column.key)"
                 />
-	                <span class="field-check-title">
-	                  <span>{{ column.label }}</span>
-	                  <span class="field-check-actions">
-	                    <button
-	                      v-if="isTableConfigFormulaCandidate(column)"
-	                      class="secondary field-config-button"
-	                      type="button"
-	                      @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
-	                    >
-	                      公式
-	                    </button>
-	                    <button
-	                      v-if="isTableConfigSelectableColumn(column)"
-	                      class="secondary field-config-button"
-	                      type="button"
-	                      @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
-	                    >
-	                      配置
-	                    </button>
-	                  </span>
+	                <span class="field-check-body">
+	                  <span class="field-check-title">{{ column.label }}</span>
+	                  <small>
+	                    {{ column.key }}
+	                    <em v-if="isTableConfigSingleColumn(column)">单选</em>
+	                    <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
+	                    <em v-if="isTableConfigFormulaColumn(column)">公式</em>
+	                  </small>
 	                </span>
-	                <small>
-	                  {{ column.key }}
-	                  <em v-if="isTableConfigSingleColumn(column)">单选</em>
-	                  <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
-	                  <em v-if="isTableConfigFormulaColumn(column)">公式</em>
-	                </small>
+	                <span class="field-check-actions">
+	                  <button
+	                    v-if="isTableConfigFormulaCandidate(column)"
+	                    class="secondary field-config-button"
+	                    type="button"
+	                    @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
+	                  >
+	                    公式
+	                  </button>
+	                  <button
+	                    v-if="isTableConfigSelectableColumn(column)"
+	                    class="secondary field-config-button"
+	                    type="button"
+	                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
+	                  >
+	                    配置
+	                  </button>
+	                </span>
 	              </label>
             </div>
 
