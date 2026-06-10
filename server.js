@@ -646,6 +646,7 @@ async function saveMiddlePlatformTableData(payload) {
     if (!primaryKeyColumn) throw new Error(`${schemaTable.tableComment || tableName} 没有主键，不能在线编辑`);
 
     const columnsByKey = new Map(schemaTable.columns.map(column => [column.key, column]));
+    const formulaConfigs = await getFormulaConfigsForTable(conn, schemaTable);
     let inserted = 0;
     let updated = 0;
     let deleted = 0;
@@ -657,7 +658,10 @@ async function saveMiddlePlatformTableData(payload) {
     await conn.beginTransaction();
 
     for (let rowIndex = 0; rowIndex < inserts.length; rowIndex += 1) {
-      const changes = inserts[rowIndex]?.changes && typeof inserts[rowIndex].changes === 'object' ? inserts[rowIndex].changes : {};
+      const changes = inserts[rowIndex]?.changes && typeof inserts[rowIndex].changes === 'object'
+        ? { ...inserts[rowIndex].changes }
+        : {};
+      applyServerFormulaChanges(schemaTable, formulaConfigs, changes, {}, { force: true });
       const fields = [];
       const values = [];
 
@@ -699,10 +703,12 @@ async function saveMiddlePlatformTableData(payload) {
       if (result.insertId) insertedIds.push(result.insertId);
     }
 
+    const updateBaseRows = await getMiddleUpdateBaseRows(conn, schemaTable, primaryKeyColumn, updates, formulaConfigs);
+
     for (let rowIndex = 0; rowIndex < updates.length; rowIndex += 1) {
       const update = updates[rowIndex];
       const primaryValue = update?.primaryKey?.value;
-      const changes = update?.changes && typeof update.changes === 'object' ? update.changes : {};
+      const changes = update?.changes && typeof update.changes === 'object' ? { ...update.changes } : {};
 
       if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') {
         errors.push(`第 ${rowIndex + 1} 行缺少主键，不能保存`);
@@ -711,6 +717,13 @@ async function saveMiddlePlatformTableData(payload) {
 
       const setParts = [];
       const values = [];
+      applyServerFormulaChanges(
+        schemaTable,
+        formulaConfigs,
+        changes,
+        updateBaseRows.get(String(primaryValue)) || {},
+        { force: false }
+      );
 
       for (const [field, rawValue] of Object.entries(changes)) {
         const column = columnsByKey.get(field);
@@ -1842,6 +1855,68 @@ function buildFormulaAggregateSql(dependency) {
     return `(SELECT ${columnName} FROM ${tableName} LIMIT 1)`;
   }
   throw new Error(`未知公式聚合方式：${dependency.aggregate}`);
+}
+
+async function getMiddleUpdateBaseRows(conn, schemaTable, primaryKeyColumn, updates, formulaConfigs) {
+  if (!formulaConfigs.length || !updates.length) return new Map();
+  const ids = uniqueStrings(
+    updates
+      .map(update => update?.primaryKey?.value)
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(String)
+  );
+  if (!ids.length) return new Map();
+
+  const [rows] = await conn.query(
+    `SELECT *
+     FROM ${escapeIdentifier(schemaTable.tableName)}
+     WHERE ${escapeIdentifier(primaryKeyColumn.key)} IN (${ids.map(() => '?').join(', ')})`,
+    ids
+  );
+  return new Map(rows.map(row => [String(row[primaryKeyColumn.key]), row]));
+}
+
+function applyServerFormulaChanges(schemaTable, formulaConfigs, changes, baseRow = {}, options = {}) {
+  if (!formulaConfigs.length) return;
+  for (const config of formulaConfigs) {
+    if (!config.columnName || Object.prototype.hasOwnProperty.call(changes, config.columnName)) continue;
+    const dependencies = config.dependencies?.length ? config.dependencies : extractFormulaDependencies(config.expression);
+    const currentDependencies = dependencies.filter(dependency => dependency.scope === 'current');
+    const hasChangedDependency = currentDependencies.some(dependency =>
+      Object.prototype.hasOwnProperty.call(changes, dependency.columnName)
+    );
+    if (!options.force && !hasChangedDependency) continue;
+    if (dependencies.some(dependency => dependency.scope !== 'current')) continue;
+
+    const row = { ...baseRow, ...changes };
+    const value = evaluateCurrentRowFormula(schemaTable, config.expression, row);
+    if (value !== '') changes[config.columnName] = value;
+  }
+}
+
+function evaluateCurrentRowFormula(schemaTable, expression, row) {
+  validateFormulaExpressionText(expression);
+  const currentColumns = new Set(schemaTable.columns.map(column => column.key));
+  const safeExpression = expression.replace(/\{([^{}]+)\}/g, (_, token) => {
+    const dependency = parseFormulaToken(token);
+    if (dependency.scope !== 'current' || !currentColumns.has(dependency.columnName)) return '0';
+    return String(toFormulaNumber(row[dependency.columnName]));
+  });
+  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
+  try {
+    const value = Function(`"use strict"; return (${safeExpression});`)();
+    if (!Number.isFinite(Number(value))) return '';
+    return Number(Number(value).toFixed(2));
+  } catch {
+    return '';
+  }
+}
+
+function toFormulaNumber(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  const normalized = String(value).replace(/,/g, '').trim();
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function getSelectOptionsForColumn(optionsByField, tableComment, columnComment) {
