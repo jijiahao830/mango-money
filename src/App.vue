@@ -2107,6 +2107,7 @@ async function savePushConfig() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '保存推送配置失败');
+    pushConfig.webhook = data.webhook || '';
     pushConfigStatusText.value = '推送配置已保存';
   } catch (error) {
     pushConfigErrorText.value = error?.message || String(error);

@@ -1027,10 +1027,9 @@ async function deleteUser(id) {
 }
 
 async function getPushConfig() {
-  const config = await readAppConfig();
   return {
     ok: true,
-    webhook: config.wecom?.webhook || ''
+    webhook: await readWecomWebhook()
   };
 }
 
@@ -1040,13 +1039,8 @@ async function savePushConfig(payload) {
     throw new Error('企业微信 Webhook 地址格式不正确');
   }
 
-  const config = await readAppConfig();
-  config.wecom = {
-    ...(config.wecom || {}),
-    webhook
-  };
-  await writeAppConfig(config);
-  return { ok: true };
+  const savedWebhook = await writeWecomWebhook(webhook);
+  return { ok: true, webhook: savedWebhook };
 }
 
 async function pushGeneratedImageToWecom(payload) {
@@ -1054,8 +1048,7 @@ async function pushGeneratedImageToWecom(payload) {
   const fileName = String(payload.fileName || '').trim();
   if (!fileDate || !fileName) throw new Error('缺少要推送的图片信息，请重新生成图片');
 
-  const config = await readAppConfig();
-  const webhook = String(config.wecom?.webhook || '').trim();
+  const webhook = await readWecomWebhook();
   if (!webhook) throw new Error('请先配置企业微信 Webhook 地址');
 
   const imagePath = await resolveCreateFilePath(fileDate, fileName);
@@ -1455,6 +1448,21 @@ async function ensureStatementTable(conn) {
 async function readMysqlConfig() {
   const config = await readAppConfig();
   return config.mysql || {};
+}
+
+async function readWecomWebhook() {
+  const config = await readAppConfig();
+  return String(config.wecom?.webhook || '').trim();
+}
+
+async function writeWecomWebhook(webhook) {
+  const config = await readAppConfig();
+  config.wecom = {
+    ...(config.wecom || {}),
+    webhook
+  };
+  await writeAppConfig(config);
+  return readWecomWebhook();
 }
 
 async function ensureAppDirs() {
