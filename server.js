@@ -877,6 +877,7 @@ async function saveTableManagementConfig(payload) {
       for (const column of submittedColumns) {
         const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
         if (!schemaColumn) continue;
+        const submittedFieldKind = normalizeFieldKind(column.fieldKind) || inferFieldKind(schemaColumn);
 
         if (isConfigurableSelectColumn(schemaColumn) || isConfigurableOptionColumn(schemaColumn) || column.optionConfig) {
           const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
@@ -895,43 +896,46 @@ async function saveTableManagementConfig(payload) {
             }
             await conn.execute(
               `INSERT INTO cw_field_option_config (
-                table_name,
-                column_name,
-                options_json,
-                option_source_type,
-                source_table_name,
-                source_column_name
-              ) VALUES (?, ?, NULL, 'table', ?, ?)
-              ON DUPLICATE KEY UPDATE
-                options_json = VALUES(options_json),
-                option_source_type = VALUES(option_source_type),
-                source_table_name = VALUES(source_table_name),
-                source_column_name = VALUES(source_column_name)`,
-              [schemaTable.tableName, schemaColumn.key, optionConfig.sourceTableName, optionConfig.sourceColumnName]
-            );
-          } else if (!options.length) {
-            await conn.execute(
-              `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
-              [schemaTable.tableName, schemaColumn.key]
-            );
-          } else {
-            await conn.execute(
-              `INSERT INTO cw_field_option_config (
-                table_name,
-                column_name,
-                options_json,
-                option_source_type,
-                source_table_name,
-                source_column_name
-              ) VALUES (?, ?, ?, 'static', '', '')
-              ON DUPLICATE KEY UPDATE
-                options_json = VALUES(options_json),
-                option_source_type = VALUES(option_source_type),
-                source_table_name = VALUES(source_table_name),
-                source_column_name = VALUES(source_column_name)`,
-              [schemaTable.tableName, schemaColumn.key, JSON.stringify(options)]
-            );
-          }
+	                table_name,
+	                column_name,
+	                options_json,
+	                option_source_type,
+	                source_table_name,
+	                source_column_name,
+	                field_kind
+	              ) VALUES (?, ?, NULL, 'table', ?, ?, ?)
+	              ON DUPLICATE KEY UPDATE
+	                options_json = VALUES(options_json),
+	                option_source_type = VALUES(option_source_type),
+	                source_table_name = VALUES(source_table_name),
+	                source_column_name = VALUES(source_column_name),
+	                field_kind = VALUES(field_kind)`,
+	              [schemaTable.tableName, schemaColumn.key, optionConfig.sourceTableName, optionConfig.sourceColumnName, submittedFieldKind]
+	            );
+	          } else if (!options.length) {
+	            await saveFieldKindOnlyConfig(conn, schemaTable.tableName, schemaColumn.key, submittedFieldKind);
+	          } else {
+	            await conn.execute(
+	              `INSERT INTO cw_field_option_config (
+	                table_name,
+	                column_name,
+	                options_json,
+	                option_source_type,
+	                source_table_name,
+	                source_column_name,
+	                field_kind
+	              ) VALUES (?, ?, ?, 'static', '', '', ?)
+	              ON DUPLICATE KEY UPDATE
+	                options_json = VALUES(options_json),
+	                option_source_type = VALUES(option_source_type),
+	                source_table_name = VALUES(source_table_name),
+	                source_column_name = VALUES(source_column_name),
+	                field_kind = VALUES(field_kind)`,
+	              [schemaTable.tableName, schemaColumn.key, JSON.stringify(options), submittedFieldKind]
+	            );
+	          }
+        } else {
+          await saveFieldKindOnlyConfig(conn, schemaTable.tableName, schemaColumn.key, submittedFieldKind);
         }
 
         await saveFormulaColumnConfig(conn, schemaTable, schemaColumn, column.formulaConfig, schemaMap);
@@ -1328,6 +1332,9 @@ async function ensureFieldOptionConfigTable(conn) {
   if (!names.has('source_column_name')) {
     await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN source_column_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '来源字段名' AFTER source_table_name`);
   }
+  if (!names.has('field_kind')) {
+    await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN field_kind VARCHAR(20) NOT NULL DEFAULT '' COMMENT '字段类型标签' AFTER source_column_name`);
+  }
 }
 
 async function ensureFormulaFieldConfigTable(conn) {
@@ -1433,6 +1440,11 @@ async function getSchemaTables(conn) {
       enumValues,
       selectOptions: finalSelectOptions.length ? finalSelectOptions : enumValues,
       optionConfig: configuredFieldOption.optionConfig || { type: 'static', sourceTableName: '', sourceColumnName: '' },
+      fieldKind: configuredFieldOption.fieldKind || inferFieldKind({
+        ...column,
+        enumValues,
+        selectOptions: finalSelectOptions.length ? finalSelectOptions : enumValues
+      }),
       isNullable: column.isNullable === 'YES',
       columnKey: column.columnKey || '',
       extra: column.extra || '',
@@ -1488,11 +1500,12 @@ async function getConfiguredFieldOptionsByDbField(conn) {
     SELECT
       table_name,
       column_name,
-      options_json,
-      option_source_type,
-      source_table_name,
-      source_column_name
-    FROM cw_field_option_config
+	      options_json,
+	      option_source_type,
+	      source_table_name,
+	      source_column_name,
+	      field_kind
+	    FROM cw_field_option_config
   `);
   const configByField = new Map();
   for (const row of rows) {
@@ -1504,10 +1517,11 @@ async function getConfiguredFieldOptionsByDbField(conn) {
     const options = optionConfig.type === 'table'
       ? await getTableColumnOptions(conn, optionConfig.sourceTableName, optionConfig.sourceColumnName)
       : uniqueStrings(parseJsonArray(row.options_json));
-    configByField.set(`${row.table_name}::${row.column_name}`, {
-      options,
-      optionConfig
-    });
+	    configByField.set(`${row.table_name}::${row.column_name}`, {
+	      options,
+	      optionConfig,
+	      fieldKind: normalizeFieldKind(row.field_kind)
+	    });
   }
   return configByField;
 }
@@ -1528,6 +1542,31 @@ async function getTableColumnOptions(conn, tableName, columnName) {
 
 function isSafeDbIdentifier(value) {
   return /^[a-zA-Z0-9_]+$/.test(String(value || ''));
+}
+
+function normalizeFieldKind(value) {
+  const kind = String(value || '').trim();
+  return ['single', 'multi', 'text', 'date', 'image', 'file', 'relation', 'calc'].includes(kind) ? kind : '';
+}
+
+function inferFieldKind(column) {
+  const dataType = String(column?.dataType || '').toLowerCase();
+  const columnType = String(column?.columnType || '').toLowerCase();
+  const text = `${column?.columnName || ''} ${column?.columnComment || ''}`.toLowerCase();
+  if (isImageLikeFieldText(text)) return 'image';
+  if (isFileLikeFieldText(text)) return 'file';
+  if (dataType === 'json' || columnType === 'json') return 'multi';
+  if (column?.enumValues?.length || column?.selectOptions?.length) return 'single';
+  if (['date', 'datetime', 'timestamp'].includes(dataType)) return 'date';
+  return 'text';
+}
+
+function isImageLikeFieldText(text) {
+  return ['image', 'img', 'photo', 'photos', 'picture', 'pictures', '图片', '照片', '影像'].some(token => text.includes(token));
+}
+
+function isFileLikeFieldText(text) {
+  return ['file', 'attachment', 'attachments', '文件', '附件', '凭证', '票据', '保单'].some(token => text.includes(token));
 }
 
 async function getFormulaConfigsByTable(conn, schemaTables) {
@@ -1856,6 +1895,24 @@ function normalizeSubmittedOptionConfig(config) {
     };
   }
   return { type: 'static', sourceTableName: '', sourceColumnName: '' };
+}
+
+async function saveFieldKindOnlyConfig(conn, tableName, columnName, fieldKind) {
+  if (!fieldKind) return;
+  await conn.execute(
+    `INSERT INTO cw_field_option_config (
+      table_name,
+      column_name,
+      options_json,
+      option_source_type,
+      source_table_name,
+      source_column_name,
+      field_kind
+    ) VALUES (?, ?, NULL, 'static', '', '', ?)
+    ON DUPLICATE KEY UPDATE
+      field_kind = VALUES(field_kind)`,
+    [tableName, columnName, fieldKind]
+  );
 }
 
 function parseEnumValues(columnType) {

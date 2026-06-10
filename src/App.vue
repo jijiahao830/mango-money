@@ -1041,13 +1041,17 @@
                   @change="toggleTableField(selectedTableConfig, column.key)"
                 />
 	                <span class="field-check-body">
-	                  <span class="field-check-title">{{ column.label }}</span>
-	                  <small>
-	                    {{ column.key }}
-	                    <em v-if="isTableConfigSingleColumn(column)">单选</em>
-	                    <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
-	                    <em v-if="isTableConfigFormulaColumn(column)">公式</em>
-	                  </small>
+		                  <span class="field-check-title">{{ column.label }}</span>
+		                  <small>
+		                    {{ column.key }}
+		                    <button
+		                      class="field-kind-tag"
+		                      type="button"
+		                      @click.prevent.stop="toggleFieldKind(column)"
+		                    >
+		                      {{ getFieldKindLabel(column) }}
+		                    </button>
+		                  </small>
 	                </span>
 	                <span class="field-check-actions">
 	                  <button
@@ -1432,6 +1436,16 @@ const permissionOptions = [
   { value: 'sales', label: '销售' },
   { value: 'fleet_manager', label: '车队长' },
   { value: 'administrator', label: '管理员' }
+];
+const fieldKindOptions = [
+  { value: 'single', label: '单选' },
+  { value: 'multi', label: '多选' },
+  { value: 'text', label: '文本' },
+  { value: 'date', label: '日期' },
+  { value: 'image', label: '图片' },
+  { value: 'file', label: '文件' },
+  { value: 'relation', label: '关联' },
+  { value: 'calc', label: '计算' }
 ];
 
 const currentUser = ref(readStoredUser());
@@ -2351,6 +2365,7 @@ function isMiddleMultiFilterColumn(column) {
 }
 
 function isMiddleMultiSelectColumn(column) {
+  if (column?.fieldKind === 'multi') return true;
   if (!column || column.enumValues?.length) return false;
   if (!Array.isArray(column.selectOptions) || !column.selectOptions.length) return false;
   const dataType = String(column.dataType || '').toLowerCase();
@@ -2359,6 +2374,7 @@ function isMiddleMultiSelectColumn(column) {
 }
 
 function isMiddleSingleSelectColumn(column) {
+  if (column?.fieldKind === 'single' || column?.fieldKind === 'relation') return true;
   if (!column || isMiddleMultiSelectColumn(column)) return false;
   return Boolean(column.enumValues?.length || column.selectOptions?.length);
 }
@@ -3055,6 +3071,41 @@ function isTableConfigFormulaColumn(column) {
 
 function isTableConfigFormulaCandidate(column) {
   return !isHiddenTableConfigColumn(column?.key);
+}
+
+function getFieldKind(column) {
+  if (column?.fieldKind) return column.fieldKind;
+  if (isTableConfigFormulaColumn(column)) return 'calc';
+  if (isTableConfigMultiColumn(column)) return 'multi';
+  if (isTableConfigSingleColumn(column)) return 'single';
+  const dataType = String(column?.dataType || '').toLowerCase();
+  if (['date', 'datetime', 'timestamp'].includes(dataType)) return 'date';
+  if (isMiddleFileLikeColumn(column)) return 'file';
+  return 'text';
+}
+
+function getFieldKindLabel(column) {
+  const kind = getFieldKind(column);
+  return fieldKindOptions.find(option => option.value === kind)?.label || '文本';
+}
+
+function toggleFieldKind(column) {
+  const current = getFieldKind(column);
+  const index = fieldKindOptions.findIndex(option => option.value === current);
+  const next = fieldKindOptions[(index + 1) % fieldKindOptions.length];
+  column.fieldKind = next.value;
+  if (next.value === 'single') {
+    column.enumValues = column.enumValues || [];
+    column.selectOptions = column.selectOptions || [];
+  }
+  if (next.value === 'multi') {
+    column.selectOptions = column.selectOptions || [];
+  }
+  if (next.value === 'calc' && !column.formulaConfig) {
+    column.formulaConfig = { expression: '', dependencies: [], isEnabled: false };
+  }
+  tableConfigStatusText.value = '字段类型标签已更新，点击保存配置后生效';
+  tableConfigErrorText.value = '';
 }
 
 function getTableConfigColumnOptions(column) {

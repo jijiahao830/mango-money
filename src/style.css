@@ -1226,13 +1226,22 @@ hr {
   overflow-wrap: anywhere;
 }
 
-.field-check small em {
+.field-kind-tag {
   padding: 2px 6px;
+  min-height: 22px;
+  margin: 0;
+  border: 0;
   border-radius: 999px;
   color: #c2410c;
   background: #ffedd5;
-  font-style: normal;
+  font-size: 12px;
+  line-height: 1.2;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.field-kind-tag:hover {
+  background: #fed7aa;
 }
 
 .field-option-modal {
