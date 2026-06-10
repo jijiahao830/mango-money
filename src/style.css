@@ -333,6 +333,10 @@ h1 {
   background: #ffffff;
 }
 
+.middle-controls .middle-filter-multiple {
+  min-height: 82px;
+}
+
 .middle-reset-button {
   min-width: 110px;
   margin: 0;

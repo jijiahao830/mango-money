@@ -209,20 +209,30 @@
             <section class="middle-controls" aria-label="表格筛选">
               <label>
                 <span>搜索</span>
-                <input v-model="middleSearchText" placeholder="车牌号、车型名称、车辆ID" />
+                <input v-model="middleSearchText" placeholder="输入关键词" />
               </label>
               <label>
-                <span>车辆状态</span>
-                <select v-model="middleStatusFilter">
-                  <option value="">全部</option>
-                  <option v-for="status in middleStatusOptions" :key="status" :value="status">{{ status }}</option>
+                <span>筛选字段</span>
+                <select v-model="middleFilterField">
+                  <option value="">不筛选</option>
+                  <option v-for="column in middleFilterColumns" :key="column.key" :value="column.key">
+                    {{ column.label }}
+                  </option>
                 </select>
               </label>
-              <label>
-                <span>来源</span>
-                <select v-model="middleSourceFilter">
+              <label v-if="middleFilterField">
+                <span>筛选值</span>
+                <select
+                  v-if="isMiddleMultiFilter"
+                  v-model="middleFilterValues"
+                  multiple
+                  class="middle-filter-multiple"
+                >
+                  <option v-for="option in middleFilterOptions" :key="option" :value="option">{{ option }}</option>
+                </select>
+                <select v-else v-model="middleFilterValue">
                   <option value="">全部</option>
-                  <option v-for="source in middleSourceOptions" :key="source" :value="source">{{ source }}</option>
+                  <option v-for="option in middleFilterOptions" :key="option" :value="option">{{ option }}</option>
                 </select>
               </label>
               <button class="secondary middle-reset-button" type="button" @click="clearMiddleFilters">清空筛选</button>
@@ -1218,8 +1228,9 @@ const middleErrorText = ref('');
 const middleSaveStatusText = ref('');
 const middleTableSearchText = ref('');
 const middleSearchText = ref('');
-const middleStatusFilter = ref('');
-const middleSourceFilter = ref('');
+const middleFilterField = ref('');
+const middleFilterValue = ref('');
+const middleFilterValues = ref([]);
 const middleDirtyRows = reactive({});
 const middlePendingDeletes = reactive({});
 const middleSelectedRowKey = ref('');
@@ -1311,24 +1322,28 @@ const selectedMiddleRows = computed(() => {
 
   const keyword = middleSearchText.value.trim().toLowerCase();
   return table.rows.filter((row) => {
-    if (middleStatusFilter.value && row.vehicle_status !== middleStatusFilter.value) return false;
-    if (middleSourceFilter.value && row.source !== middleSourceFilter.value) return false;
+    if (!matchesMiddleFieldFilter(row)) return false;
     if (!keyword) return true;
 
-    return [
-      row.vehicle_record_id,
-      row.vehicle_id,
-      row.plate_number,
-      row.model_name,
-      row.vehicle_category,
-      row.vehicle_status,
-      row.source,
-      row.owner_name
-    ].some(value => String(value || '').toLowerCase().includes(keyword));
+    return Object.values(row)
+      .flatMap(value => parseMiddleFilterValues(value))
+      .some(value => String(value || '').toLowerCase().includes(keyword));
   });
 });
-const middleStatusOptions = computed(() => getUniqueMiddleValues('vehicle_status'));
-const middleSourceOptions = computed(() => getUniqueMiddleValues('source'));
+const middleFilterColumns = computed(() =>
+  (selectedMiddleTable.value?.columns || [])
+    .filter(column => !['id', 'create_time', 'update_time'].includes(column.key))
+);
+const middleFilterColumn = computed(() =>
+  middleFilterColumns.value.find(column => column.key === middleFilterField.value) || null
+);
+const isMiddleMultiFilter = computed(() => isMiddleMultiFilterColumn(middleFilterColumn.value));
+const middleFilterOptions = computed(() => {
+  const column = middleFilterColumn.value;
+  if (!column) return [];
+  if (column.enumValues?.length) return [...column.enumValues];
+  return getUniqueMiddleValues(column.key);
+});
 const middleDashboardCards = computed(() => {
   const rows = selectedMiddleTable.value?.rows || [];
   const countBy = (key, value) => rows.filter(row => row[key] === value).length;
@@ -1483,6 +1498,11 @@ watch(filteredMiddleTables, (tables) => {
   }
 });
 
+watch(middleFilterField, () => {
+  middleFilterValue.value = '';
+  middleFilterValues.value = [];
+});
+
 watch(currentUser, (value) => {
   if (value?.permission === 'administrator' && activePage.value === 'home') {
     loadHealthStatus();
@@ -1530,8 +1550,9 @@ async function loadMiddlePlatform() {
 
 function clearMiddleFilters() {
   middleSearchText.value = '';
-  middleStatusFilter.value = '';
-  middleSourceFilter.value = '';
+  middleFilterField.value = '';
+  middleFilterValue.value = '';
+  middleFilterValues.value = [];
 }
 
 function clearMiddleDirtyRows() {
@@ -1789,9 +1810,52 @@ async function saveMiddleTableChanges() {
 
 function getUniqueMiddleValues(key) {
   const rows = selectedMiddleTable.value?.rows || [];
-  return [...new Set(rows.map(row => row[key]).filter(Boolean))].sort((a, b) =>
+  return [...new Set(rows.flatMap(row => parseMiddleFilterValues(row[key])).filter(Boolean))].sort((a, b) =>
     String(a).localeCompare(String(b), 'zh-CN')
   );
+}
+
+function isMiddleMultiFilterColumn(column) {
+  if (!column) return false;
+  if (column.enumValues?.length) return false;
+  const dataType = String(column.dataType || '').toLowerCase();
+  const columnType = String(column.columnType || '').toLowerCase();
+  return dataType === 'json' || columnType === 'json';
+}
+
+function parseMiddleFilterValues(value) {
+  if (value === undefined || value === null || value === '') return [];
+  if (Array.isArray(value)) return value.flatMap(item => parseMiddleFilterValues(item));
+  if (typeof value === 'object') {
+    const preferred = value.name || value.title || value.label || value.text || value.value || value.url;
+    return [String(preferred || JSON.stringify(value))];
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return [];
+  if ((raw.startsWith('[') && raw.endsWith(']')) || (raw.startsWith('{') && raw.endsWith('}'))) {
+    try {
+      return parseMiddleFilterValues(JSON.parse(raw));
+    } catch {}
+  }
+  if (raw.includes(',')) {
+    return raw.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return [raw];
+}
+
+function matchesMiddleFieldFilter(row) {
+  const field = middleFilterField.value;
+  if (!field) return true;
+
+  const rowValues = parseMiddleFilterValues(row[field]);
+  if (isMiddleMultiFilter.value) {
+    if (!middleFilterValues.value.length) return true;
+    return middleFilterValues.value.some(value => rowValues.includes(value));
+  }
+
+  if (!middleFilterValue.value) return true;
+  return rowValues.includes(middleFilterValue.value);
 }
 
 function isMiddleTagColumn(key) {
