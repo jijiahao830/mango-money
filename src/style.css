@@ -1627,6 +1627,10 @@ hr {
   background: rgba(15, 23, 42, 0.58);
 }
 
+.preview-backdrop {
+  z-index: 80;
+}
+
 .preview-modal {
   display: flex;
   flex-direction: column;

@@ -1172,7 +1172,7 @@
 	          class="middle-file-item"
 	          :class="{ active: middleFileModal.selectedIndex === index }"
 	          type="button"
-	          @click="middleFileModal.selectedIndex = index"
+	          @click="selectMiddleFileItem(file, index)"
 	        >
 	          <span v-if="isMiddleImageFile(file)" class="middle-file-thumb">
 	            <img :src="file.dataUrl || file.url" :alt="file.name || '图片'" />
@@ -1354,7 +1354,7 @@
 	    </section>
 	  </div>
 
-	  <div v-if="isPreviewOpen" class="modal-backdrop" @click.self="closePreview">
+	  <div v-if="isPreviewOpen" class="modal-backdrop preview-backdrop" @click.self="closePreview">
     <section class="preview-modal" aria-modal="true" role="dialog">
       <header class="modal-header">
         <h2>{{ previewTitle }}</h2>
@@ -1378,7 +1378,7 @@
       </div>
 
       <footer class="modal-footer">
-        <button class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
+        <button v-if="!result.history" class="secondary push-button" type="button" :disabled="isPushLoading" @click="pushCurrentImage">
           {{ isPushLoading ? '推送中' : '推送' }}
         </button>
         <button class="download-button" type="button" @click="downloadImage">下载图片</button>
@@ -1524,6 +1524,8 @@ const fieldKindOptions = [
   { value: 'relation', label: '关联' },
   { value: 'calc', label: '计算' }
 ];
+const MIDDLE_IMAGE_WEBP_MAX_SIDE = 1600;
+const MIDDLE_IMAGE_WEBP_QUALITY = 0.82;
 
 const currentUser = ref(readStoredUser());
 const route = useRoute();
@@ -1857,6 +1859,7 @@ const healthItems = computed(() => {
 });
 
 const previewTitle = computed(() => {
+  if (result.history && result.webpName) return result.webpName;
   if (result.type === 'balance') return '尾款单预览';
   if (result.type === 'statement') return '对帐单预览';
   return '定金单预览';
@@ -2209,12 +2212,41 @@ function triggerMiddleFileUpload() {
   middleFileInputRef.value?.click();
 }
 
+function selectMiddleFileItem(file, index) {
+  middleFileModal.selectedIndex = index;
+  if (middleFileModal.kind === 'image' && isMiddleImageFile(file)) {
+    previewMiddleFileImage(file);
+  }
+}
+
+function previewMiddleFileImage(file) {
+  const href = file?.dataUrl || file?.url || file?.value || '';
+  if (!href) {
+    middleFileModal.errorText = '当前图片没有可预览地址';
+    return;
+  }
+  revokePreviewObjectUrl();
+  result.imageUrl = href;
+  result.webpName = toWebpFileName(file.name || file.originalName || 'image');
+  result.fileDate = middleFileModal.columnLabel || '';
+  result.recordSaved = true;
+  result.pushed = false;
+  result.history = true;
+  result.type = 'middle-file';
+  statusText.value = '';
+  errorText.value = '';
+  resetView();
+  isPreviewOpen.value = true;
+}
+
 async function handleMiddleFileUpload(event) {
   const files = Array.from(event.target.files || []);
   if (!files.length) return;
   middleFileModal.errorText = '';
   try {
-    const uploaded = await Promise.all(files.map(readMiddleFileAsItem));
+    const uploaded = await Promise.all(files.map(file =>
+      middleFileModal.kind === 'image' ? readMiddleImageAsWebpItem(file) : readMiddleFileAsItem(file)
+    ));
     middleFileModal.files = [...middleFileModal.files, ...uploaded];
     middleFileModal.selectedIndex = middleFileModal.files.length - 1;
   } catch (error) {
@@ -2239,6 +2271,60 @@ function readMiddleFileAsItem(file) {
   });
 }
 
+function readMiddleImageAsWebpItem(file) {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error(`${file.name} 不是图片文件`));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => reject(new Error(`${file.name} 图片解析失败`));
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        const width = image.naturalWidth || image.width;
+        const height = image.naturalHeight || image.height;
+        const scale = Math.min(1, MIDDLE_IMAGE_WEBP_MAX_SIDE / Math.max(width, height));
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('浏览器不支持图片转换'));
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob(blob => {
+          if (!blob) {
+            reject(new Error(`${file.name} 转换 WebP 失败`));
+            return;
+          }
+          const webpReader = new FileReader();
+          webpReader.onerror = () => reject(new Error(`${file.name} WebP 读取失败`));
+          webpReader.onload = () => resolve({
+            name: toWebpFileName(file.name),
+            originalName: file.name,
+            type: 'image/webp',
+            size: blob.size,
+            dataUrl: String(webpReader.result || ''),
+            uploadedAt: new Date().toISOString()
+          });
+          webpReader.readAsDataURL(blob);
+        }, 'image/webp', MIDDLE_IMAGE_WEBP_QUALITY);
+      };
+      image.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function toWebpFileName(name) {
+  const base = String(name || 'image').replace(/\.[^.]+$/, '') || 'image';
+  return `${base}.webp`;
+}
+
 function downloadSelectedMiddleFile() {
   const file = middleFileModal.files[middleFileModal.selectedIndex] || middleFileModal.files[0];
   if (!file) return;
@@ -2249,7 +2335,9 @@ function downloadSelectedMiddleFile() {
   }
   const anchor = document.createElement('a');
   anchor.href = href;
-  anchor.download = file.name || 'download';
+  anchor.download = middleFileModal.kind === 'image'
+    ? toWebpFileName(file.name || file.originalName || 'image')
+    : file.name || 'download';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

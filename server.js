@@ -55,6 +55,8 @@ const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
 const PASSWORD_ENCRYPTION_PREFIX = 'aes-ecb:';
 const FORMULA_VIEW_PREFIX = 'cw_formula_view_';
 const CONFIG_TABLES = ['cw_table_view_config', 'cw_field_option_config', 'cw_formula_field_config'];
+const DEFAULT_JSON_BODY_LIMIT = 1024 * 1024;
+const MIDDLE_TABLE_JSON_BODY_LIMIT = 25 * 1024 * 1024;
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -84,7 +86,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/middle-platform/table-data') {
-      const payload = await readJsonBody(req);
+      const payload = await readJsonBody(req, MIDDLE_TABLE_JSON_BODY_LIMIT);
       const result = await saveMiddlePlatformTableData(payload);
       sendJson(res, result);
       return;
@@ -2623,13 +2625,13 @@ function findServerChromePath() {
   return '';
 }
 
-async function readJsonBody(req) {
+async function readJsonBody(req, limit = DEFAULT_JSON_BODY_LIMIT) {
   const chunks = [];
   let size = 0;
 
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1024 * 1024) throw new Error('Request body is too large');
+    if (size > limit) throw new Error(`请求内容过大，当前接口限制 ${formatByteSize(limit)}`);
     chunks.push(chunk);
   }
 
@@ -2638,6 +2640,12 @@ async function readJsonBody(req) {
   } catch {
     throw new Error('Invalid JSON body');
   }
+}
+
+function formatByteSize(bytes) {
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)}MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)}KB`;
+  return `${bytes}B`;
 }
 
 async function serveStatic(pathname, res, headOnly = false) {
