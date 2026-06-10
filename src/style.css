@@ -522,8 +522,39 @@ h1 {
   font-size: 13px;
 }
 
-.middle-cell-multiple {
-  height: 68px;
+.middle-cell-multi-wrap {
+  position: relative;
+}
+
+.middle-cell-multi-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin: 0;
+  color: #111827;
+  background: #ffffff;
+  text-align: left;
+}
+
+.middle-cell-multi-button::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid #111827;
+  border-bottom: 1.5px solid #111827;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.middle-cell-multi-button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.middle-cell-popover {
+  top: 0;
+  left: calc(100% + 8px);
 }
 
 .middle-cell-input.changed {

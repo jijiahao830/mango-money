@@ -279,16 +279,37 @@
                   >
                     <td class="row-index">{{ rowIndex + 1 }}</td>
                     <td v-for="column in selectedMiddleTable.columns" :key="column.key">
-                      <select
+                      <div
                         v-if="column.isEditable && isMiddleMultiSelectColumn(column)"
-                        v-model="row[column.key]"
-                        multiple
-                        class="middle-cell-input middle-cell-multiple"
-                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
-                        @change="markMiddleCellDirty(row, column.key)"
+                        class="middle-cell-multi-wrap"
                       >
-                        <option v-for="option in column.selectOptions" :key="option" :value="option">{{ option }}</option>
-                      </select>
+                        <button
+                          class="middle-cell-input middle-cell-multi-button"
+                          :class="{ changed: isMiddleCellDirty(row, column.key) }"
+                          type="button"
+                          @click.stop="openMiddleCellMultiSelect(row, rowIndex, column)"
+                        >
+                          <span>{{ formatMiddleMultiCellValue(row[column.key]) || '空' }}</span>
+                        </button>
+                        <div
+                          v-if="isMiddleCellMultiSelectOpen(row, rowIndex, column)"
+                          class="middle-filter-popover middle-cell-popover"
+                          @click.stop
+                        >
+                          <header>
+                            <strong>{{ column.label }}</strong>
+                            <button type="button" class="middle-filter-close" @click="closeMiddleCellMultiSelect">
+                              关闭
+                            </button>
+                          </header>
+                          <div class="middle-filter-option-list">
+                            <label v-for="option in column.selectOptions" :key="option" class="middle-filter-option">
+                              <input v-model="middleCellMultiDraftValues" type="checkbox" :value="option" />
+                              <span>{{ option }}</span>
+                            </label>
+                          </div>
+                        </div>
+                      </div>
                       <select
                         v-else-if="column.isEditable && column.enumValues?.length"
                         v-model="row[column.key]"
@@ -1300,6 +1321,12 @@ const middleFilterValue = ref('');
 const middleFilterValues = ref([]);
 const middleFilterDraftValues = ref([]);
 const isMiddleMultiFilterOpen = ref(false);
+const middleCellMultiSelect = reactive({
+  rowKey: '',
+  field: '',
+  row: null
+});
+const middleCellMultiDraftValues = ref([]);
 const middleDirtyRows = reactive({});
 const middlePendingDeletes = reactive({});
 const middleSelectedRowKey = ref('');
@@ -1606,6 +1633,7 @@ watch(middleFilterField, () => {
   middleFilterValues.value = [];
   middleFilterDraftValues.value = [];
   isMiddleMultiFilterOpen.value = false;
+  clearMiddleCellMultiSelect();
 });
 
 watch(currentUser, (value) => {
@@ -1679,6 +1707,14 @@ function clearMiddleFilters() {
   middleFilterValues.value = [];
   middleFilterDraftValues.value = [];
   isMiddleMultiFilterOpen.value = false;
+  clearMiddleCellMultiSelect();
+}
+
+function clearMiddleCellMultiSelect() {
+  middleCellMultiSelect.rowKey = '';
+  middleCellMultiSelect.field = '';
+  middleCellMultiSelect.row = null;
+  middleCellMultiDraftValues.value = [];
 }
 
 function clearMiddleDirtyRows() {
@@ -1770,6 +1806,35 @@ function isMiddleCellDirty(row, field) {
   if (row?.__isNew) return String(row[field] ?? '').trim() !== '';
   const dirty = middleDirtyRows[getMiddleRowDirtyKey(row)];
   return Boolean(dirty?.changes && Object.prototype.hasOwnProperty.call(dirty.changes, field));
+}
+
+function formatMiddleMultiCellValue(value) {
+  return parseMiddleFilterValues(value).join('、');
+}
+
+function openMiddleCellMultiSelect(row, rowIndex, column) {
+  const rowKey = getMiddleRowRenderKey(row, rowIndex);
+  middleCellMultiSelect.rowKey = rowKey;
+  middleCellMultiSelect.field = column.key;
+  middleCellMultiSelect.row = row;
+  middleCellMultiDraftValues.value = parseMiddleFilterValues(row[column.key])
+    .filter(value => column.selectOptions.includes(value));
+}
+
+function isMiddleCellMultiSelectOpen(row, rowIndex, column) {
+  return middleCellMultiSelect.rowKey === getMiddleRowRenderKey(row, rowIndex)
+    && middleCellMultiSelect.field === column.key;
+}
+
+function closeMiddleCellMultiSelect() {
+  const row = middleCellMultiSelect.row;
+  const field = middleCellMultiSelect.field;
+  const column = selectedMiddleTable.value?.columns?.find(item => item.key === field);
+  if (row && field && column) {
+    row[field] = middleCellMultiDraftValues.value.filter(value => column.selectOptions.includes(value));
+    markMiddleCellDirty(row, field);
+  }
+  clearMiddleCellMultiSelect();
 }
 
 function addMiddleRow() {
