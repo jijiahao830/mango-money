@@ -328,8 +328,17 @@
                               <span>{{ option }}</span>
                             </label>
                           </div>
-                        </div>
+	                        </div>
                       </div>
+                      <button
+                        v-else-if="isMiddleFileLikeColumn(column)"
+                        class="middle-cell-input middle-file-cell-button"
+                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
+                        type="button"
+                        @click.stop="openMiddleFileCellModal(row, rowIndex, column)"
+                      >
+                        {{ getMiddleFileCellText(row, column) }}
+                      </button>
 	                      <select
 	                        v-else-if="column.isEditable && isMiddleSingleSelectColumn(column)"
 	                        v-model="row[column.key]"
@@ -1137,6 +1146,57 @@
 	    </button>
 	  </div>
 
+	  <div v-if="middleFileModal.isOpen" class="modal-backdrop confirm-backdrop middle-file-modal-backdrop">
+	    <section class="confirm-modal middle-file-modal" role="dialog" aria-modal="true">
+	      <header class="modal-header">
+	        <div>
+	          <h2>{{ middleFileModal.columnLabel }}</h2>
+	          <p>{{ middleFileModal.tableLabel }} · {{ middleFileModal.kindLabel }}</p>
+	        </div>
+	        <button class="secondary tool-button middle-file-close-button" type="button" @click="closeMiddleFileCellModal">关闭</button>
+	      </header>
+
+	      <input
+	        ref="middleFileInputRef"
+	        class="middle-file-hidden-input"
+	        type="file"
+	        :accept="middleFileModal.accept"
+	        :multiple="true"
+	        @change="handleMiddleFileUpload"
+	      />
+
+	      <div class="middle-file-list">
+	        <button
+	          v-for="(file, index) in middleFileModal.files"
+	          :key="`${file.name || 'file'}-${index}`"
+	          class="middle-file-item"
+	          :class="{ active: middleFileModal.selectedIndex === index }"
+	          type="button"
+	          @click="middleFileModal.selectedIndex = index"
+	        >
+	          <span v-if="isMiddleImageFile(file)" class="middle-file-thumb">
+	            <img :src="file.dataUrl || file.url" :alt="file.name || '图片'" />
+	          </span>
+	          <span v-else class="middle-file-icon">FILE</span>
+	          <span class="middle-file-info">
+	            <strong>{{ file.name || '未命名文件' }}</strong>
+	            <small>{{ formatMiddleFileSize(file.size) }}</small>
+	          </span>
+	        </button>
+	        <p v-if="!middleFileModal.files.length" class="empty-text middle-file-empty">暂无文件</p>
+	      </div>
+
+	      <p v-if="middleFileModal.errorText" class="error-text">{{ middleFileModal.errorText }}</p>
+
+	      <div class="modal-footer middle-file-footer">
+	        <button type="button" @click="triggerMiddleFileUpload">上传</button>
+	        <button class="secondary" type="button" :disabled="!middleFileModal.files.length" @click="downloadSelectedMiddleFile">下载</button>
+	        <button class="secondary" type="button" :disabled="middleFileModal.selectedIndex < 0" @click="deleteSelectedMiddleFile">删除</button>
+	        <button type="button" @click="saveMiddleFileCellModal">保存</button>
+	      </div>
+	    </section>
+	  </div>
+
 	  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
 	    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
       <header class="modal-header">
@@ -1525,6 +1585,20 @@ const middleCellMultiSelect = reactive({
   row: null
 });
 const middleCellMultiDraftValues = ref([]);
+const middleFileInputRef = ref(null);
+const middleFileModal = reactive({
+  isOpen: false,
+  tableLabel: '',
+  columnKey: '',
+  columnLabel: '',
+  kind: 'file',
+  kindLabel: '文件字段',
+  accept: '',
+  row: null,
+  files: [],
+  selectedIndex: -1,
+  errorText: ''
+});
 const middleDirtyRows = reactive({});
 const middlePendingDeletes = reactive({});
 const middleSelectedRowKey = ref('');
