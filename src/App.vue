@@ -1220,14 +1220,16 @@
 
 	      <div class="middle-file-preview-stage">
 	        <iframe
-	          v-if="middleFilePreviewModal.url"
+	          v-if="middleFilePreviewModal.canPreview && middleFilePreviewModal.url"
 	          :src="middleFilePreviewModal.url"
 	          :title="middleFilePreviewModal.title"
 	        ></iframe>
-	        <p v-else class="empty-text">当前文件没有可预览地址</p>
+	        <div v-else class="middle-file-preview-empty">
+	          <strong>{{ middleFilePreviewModal.errorText || '当前文件类型暂不支持在线预览' }}</strong>
+	          <span v-if="middleFilePreviewModal.url">请下载后查看原文件。</span>
+	          <span v-else>当前文件没有可预览地址。</span>
+	        </div>
 	      </div>
-
-	      <p v-if="middleFilePreviewModal.errorText" class="error-text">{{ middleFilePreviewModal.errorText }}</p>
 
 	      <footer class="modal-footer middle-file-footer">
 	        <button class="download-button" type="button" @click="downloadMiddleFilePreview">下载文件</button>
@@ -1649,6 +1651,7 @@ const middleFilePreviewModal = reactive({
   url: '',
   type: '',
   file: null,
+  canPreview: false,
   errorText: ''
 });
 const middleDirtyRows = reactive({});
@@ -2361,12 +2364,14 @@ function previewMiddleFile(file) {
     middleFileModal.errorText = '当前文件没有可预览地址';
     return;
   }
+  const canPreview = canPreviewMiddleFile(file);
   middleFilePreviewModal.isOpen = true;
   middleFilePreviewModal.title = file?.name || '文件预览';
   middleFilePreviewModal.url = href;
   middleFilePreviewModal.type = file?.type || '';
   middleFilePreviewModal.file = file;
-  middleFilePreviewModal.errorText = '';
+  middleFilePreviewModal.canPreview = canPreview;
+  middleFilePreviewModal.errorText = canPreview ? '' : '当前文件类型暂不支持在线预览';
 }
 
 function closeMiddleFilePreview() {
@@ -2375,6 +2380,7 @@ function closeMiddleFilePreview() {
   middleFilePreviewModal.url = '';
   middleFilePreviewModal.type = '';
   middleFilePreviewModal.file = null;
+  middleFilePreviewModal.canPreview = false;
   middleFilePreviewModal.errorText = '';
 }
 
@@ -2516,6 +2522,16 @@ function downloadMiddleFileItem(file, options = {}) {
 
 function getMiddleFileHref(file) {
   return file?.dataUrl || file?.url || file?.value || file?.image_url || '';
+}
+
+function canPreviewMiddleFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || file?.url || '').toLowerCase();
+  const href = getMiddleFileHref(file).toLowerCase();
+  if (type === 'application/pdf' || name.endsWith('.pdf') || href.startsWith('data:application/pdf')) return true;
+  if (type.startsWith('text/')) return true;
+  if (['application/json', 'application/xml', 'image/svg+xml'].includes(type)) return true;
+  return ['.txt', '.csv', '.json', '.xml', '.md', '.markdown', '.html', '.htm', '.svg'].some(ext => name.endsWith(ext));
 }
 
 function deleteSelectedMiddleFile() {

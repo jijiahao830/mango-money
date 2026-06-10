@@ -1864,6 +1864,27 @@ hr {
   background: #ffffff;
 }
 
+.middle-file-preview-empty {
+  display: flex;
+  min-height: 520px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: #64748b;
+  text-align: center;
+}
+
+.middle-file-preview-empty strong {
+  color: #111827;
+  font-size: 18px;
+}
+
+.middle-file-preview-empty span {
+  font-size: 14px;
+}
+
 .confirm-message {
   margin: 4px 0 0;
   color: #111827;
