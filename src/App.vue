@@ -165,8 +165,12 @@
 
       <section v-else-if="activePage === 'middle'" class="middle-platform-page">
         <aside class="middle-sidebar" aria-label="中台表列表">
+          <label class="table-sidebar-search">
+            <span>搜索表格</span>
+            <input v-model="middleTableSearchText" placeholder="输入表名或显示名" />
+          </label>
           <button
-            v-for="table in middleTables"
+            v-for="table in filteredMiddleTables"
             :key="table.key"
             class="middle-table-tab"
             :class="{ active: activeMiddleTable === table.key }"
@@ -1212,6 +1216,7 @@ const isMiddleLoading = ref(false);
 const isMiddleSaving = ref(false);
 const middleErrorText = ref('');
 const middleSaveStatusText = ref('');
+const middleTableSearchText = ref('');
 const middleSearchText = ref('');
 const middleStatusFilter = ref('');
 const middleSourceFilter = ref('');
@@ -1264,8 +1269,16 @@ const progressLogoStyle = computed(() => ({
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
 const selectedMiddleTable = computed(() =>
-  middleTables.value.find(table => table.key === activeMiddleTable.value) || middleTables.value[0] || null
+  filteredMiddleTables.value.find(table => table.key === activeMiddleTable.value) || filteredMiddleTables.value[0] || null
 );
+const filteredMiddleTables = computed(() => {
+  const keyword = middleTableSearchText.value.trim().toLowerCase();
+  if (!keyword) return middleTables.value;
+  return middleTables.value.filter(table =>
+    [table.key, table.label, table.databaseName]
+      .some(value => String(value || '').toLowerCase().includes(keyword))
+  );
+});
 const middleDirtyCount = computed(() => {
   const newRows = selectedMiddleTable.value?.rows.filter(row => row.__isNew).length || 0;
   return Object.keys(middleDirtyRows).length + Object.keys(middlePendingDeletes).length + newRows;
@@ -1463,6 +1476,13 @@ watch(filteredTableConfigItems, (items) => {
   }
 });
 
+watch(filteredMiddleTables, (tables) => {
+  if (activePage.value !== 'middle') return;
+  if (!tables.some(table => table.key === activeMiddleTable.value)) {
+    activeMiddleTable.value = tables[0]?.key || '';
+  }
+});
+
 watch(currentUser, (value) => {
   if (value?.permission === 'administrator' && activePage.value === 'home') {
     loadHealthStatus();
@@ -1497,8 +1517,8 @@ async function loadMiddlePlatform() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '读取中台数据失败');
     middleTables.value = data.tables || [];
-    if (!middleTables.value.some(table => table.key === activeMiddleTable.value)) {
-      activeMiddleTable.value = middleTables.value[0]?.key || 'cw_cxcsb';
+    if (!filteredMiddleTables.value.some(table => table.key === activeMiddleTable.value)) {
+      activeMiddleTable.value = filteredMiddleTables.value[0]?.key || '';
     }
     clearMiddleDirtyRows();
   } catch (error) {
