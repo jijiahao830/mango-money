@@ -1181,7 +1181,10 @@ hr {
 }
 
 .field-config-button {
+  width: auto;
+  min-width: 52px;
   min-height: 28px;
+  margin: 0;
   padding: 4px 10px;
   border-radius: 7px;
   font-size: 12px;
