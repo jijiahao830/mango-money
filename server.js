@@ -633,6 +633,7 @@ async function saveMiddlePlatformTableData(payload) {
   const inserts = Array.isArray(payload.inserts) ? payload.inserts : [];
   const updates = Array.isArray(payload.updates) ? payload.updates : [];
   const deletes = Array.isArray(payload.deletes) ? payload.deletes : [];
+  const operator = normalizeAuditUser(payload.operator);
   if (!tableName) throw new Error('缺少表名');
   if (!inserts.length && !updates.length && !deletes.length) return { ok: true, inserted: 0, updated: 0, deleted: 0 };
 
@@ -654,7 +655,9 @@ async function saveMiddlePlatformTableData(payload) {
     const updatedIds = [];
     const deletedIds = [];
     const errors = [];
+    const operationLogs = [];
 
+    await ensureMiddleOperationLogTable(conn);
     await conn.beginTransaction();
 
     for (let rowIndex = 0; rowIndex < inserts.length; rowIndex += 1) {
@@ -700,7 +703,17 @@ async function saveMiddlePlatformTableData(payload) {
         values
       );
       inserted += result.affectedRows || 0;
-      if (result.insertId) insertedIds.push(result.insertId);
+      if (result.insertId) {
+        insertedIds.push(result.insertId);
+        operationLogs.push(buildMiddleOperationLog({
+          operator,
+          schemaTable,
+          primaryKeyColumn,
+          operationType: 'insert',
+          primaryValue: result.insertId,
+          changes
+        }));
+      }
     }
 
     const updateBaseRows = await getMiddleUpdateBaseRows(conn, schemaTable, primaryKeyColumn, updates, formulaConfigs);
@@ -755,7 +768,17 @@ async function saveMiddlePlatformTableData(payload) {
           values
         );
         updated += result.affectedRows || 0;
-        if (result.affectedRows) updatedIds.push(primaryValue);
+        if (result.affectedRows) {
+          updatedIds.push(primaryValue);
+          operationLogs.push(buildMiddleOperationLog({
+            operator,
+            schemaTable,
+            primaryKeyColumn,
+            operationType: 'update',
+            primaryValue,
+            changes
+          }));
+        }
       }
     }
 
@@ -772,7 +795,17 @@ async function saveMiddlePlatformTableData(payload) {
         [primaryValue]
       );
       deleted += result.affectedRows || 0;
-      if (result.affectedRows) deletedIds.push(primaryValue);
+      if (result.affectedRows) {
+        deletedIds.push(primaryValue);
+        operationLogs.push(buildMiddleOperationLog({
+          operator,
+          schemaTable,
+          primaryKeyColumn,
+          operationType: 'delete',
+          primaryValue,
+          changes: {}
+        }));
+      }
     }
 
     if (errors.length) {
@@ -782,6 +815,7 @@ async function saveMiddlePlatformTableData(payload) {
       throw error;
     }
 
+    await insertMiddleOperationLogs(conn, operationLogs);
     await conn.commit();
     return {
       ok: true,
@@ -990,6 +1024,7 @@ async function loginUser(payload) {
 
   try {
     await ensureUserOptionalColumns(conn);
+    await ensureUserLoginLogTable(conn);
     const encryptedPassword = await encryptUserPassword(password);
     const [rows] = await conn.execute(
       `SELECT id, username, display_name AS displayName, permission FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND password = ? AND status = 1 LIMIT 1`,
@@ -1002,9 +1037,16 @@ async function loginUser(payload) {
       throw error;
     }
 
+    const user = rows[0];
+    await conn.execute(
+      `INSERT INTO user_login_log (user_id, username, display_name, permission)
+       VALUES (?, ?, ?, ?)`,
+      [user.id || null, user.username || '', user.displayName || '', user.permission || '']
+    );
+
     return {
       ok: true,
-      user: rows[0]
+      user
     };
   } finally {
     await conn.end();
@@ -1311,6 +1353,88 @@ async function ensureUserOptionalColumns(conn) {
     await conn.execute(`UPDATE ${escapeIdentifier(USER_TABLE)} SET permission = 'finance' WHERE permission = 'personnel' OR permission IS NULL OR permission = ''`);
     await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} MODIFY COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限'`);
   }
+}
+
+async function ensureUserLoginLogTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS user_login_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    login_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '登录时间',
+    user_id BIGINT NULL COMMENT '用户ID',
+    username VARCHAR(100) NOT NULL DEFAULT '' COMMENT '账号',
+    display_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '姓名/显示名',
+    permission VARCHAR(50) NOT NULL DEFAULT '' COMMENT '权限',
+    INDEX idx_login_time (login_time),
+    INDEX idx_username (username)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='用户登录日志'`);
+}
+
+async function ensureMiddleOperationLogTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS middle_operation_log (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    operation_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '操作时间',
+    user_id BIGINT NULL COMMENT '用户ID',
+    username VARCHAR(100) NOT NULL DEFAULT '' COMMENT '账号',
+    display_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '姓名/显示名',
+    table_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '数据库表名',
+    table_label VARCHAR(100) NOT NULL DEFAULT '' COMMENT '表显示名',
+    operation_type ENUM('insert','update','delete') NOT NULL COMMENT '操作类型',
+    primary_key_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '主键字段名',
+    primary_key_value VARCHAR(100) NOT NULL DEFAULT '' COMMENT '主键值',
+    change_json JSON NULL COMMENT '变更内容',
+    INDEX idx_operation_time (operation_time),
+    INDEX idx_user_table (username, table_name),
+    INDEX idx_table_pk (table_name, primary_key_value)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='中台操作日志'`);
+}
+
+function normalizeAuditUser(value = {}) {
+  return {
+    userId: value.id === undefined || value.id === null || value.id === '' ? null : Number(value.id),
+    username: String(value.username || '').trim(),
+    displayName: String(value.displayName || value.display_name || '').trim()
+  };
+}
+
+function buildMiddleOperationLog({ operator, schemaTable, primaryKeyColumn, operationType, primaryValue, changes }) {
+  return {
+    userId: Number.isFinite(operator.userId) ? operator.userId : null,
+    username: operator.username || '',
+    displayName: operator.displayName || '',
+    tableName: schemaTable.tableName,
+    tableLabel: schemaTable.tableComment || schemaTable.tableName,
+    operationType,
+    primaryKeyName: primaryKeyColumn.key,
+    primaryKeyValue: String(primaryValue ?? ''),
+    changeJson: changes && Object.keys(changes).length ? JSON.stringify(changes) : null
+  };
+}
+
+async function insertMiddleOperationLogs(conn, logs) {
+  if (!logs.length) return;
+  await conn.execute(
+    `INSERT INTO middle_operation_log (
+      user_id,
+      username,
+      display_name,
+      table_name,
+      table_label,
+      operation_type,
+      primary_key_name,
+      primary_key_value,
+      change_json
+    ) VALUES ${logs.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}`,
+    logs.flatMap(log => [
+      log.userId,
+      log.username,
+      log.displayName,
+      log.tableName,
+      log.tableLabel,
+      log.operationType,
+      log.primaryKeyName,
+      log.primaryKeyValue,
+      log.changeJson
+    ])
+  );
 }
 
 async function ensureTableViewConfigTable(conn) {

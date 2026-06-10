@@ -1197,6 +1197,30 @@
 	    </section>
 	  </div>
 
+	  <div v-if="middleFilePreviewModal.isOpen" class="modal-backdrop middle-file-preview-backdrop">
+	    <section class="confirm-modal middle-file-preview-modal" role="dialog" aria-modal="true">
+	      <header class="modal-header">
+	        <h2>{{ middleFilePreviewModal.title }}</h2>
+	        <button class="icon-button" type="button" aria-label="关闭文件预览" @click="closeMiddleFilePreview">×</button>
+	      </header>
+
+	      <div class="middle-file-preview-stage">
+	        <iframe
+	          v-if="middleFilePreviewModal.url"
+	          :src="middleFilePreviewModal.url"
+	          :title="middleFilePreviewModal.title"
+	        ></iframe>
+	        <p v-else class="empty-text">当前文件没有可预览地址</p>
+	      </div>
+
+	      <p v-if="middleFilePreviewModal.errorText" class="error-text">{{ middleFilePreviewModal.errorText }}</p>
+
+	      <footer class="modal-footer middle-file-footer">
+	        <button class="download-button" type="button" @click="downloadMiddleFilePreview">下载文件</button>
+	      </footer>
+	    </section>
+	  </div>
+
 	  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
 	    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
       <header class="modal-header">
@@ -1600,6 +1624,14 @@ const middleFileModal = reactive({
   isEditable: false,
   files: [],
   selectedIndex: -1,
+  errorText: ''
+});
+const middleFilePreviewModal = reactive({
+  isOpen: false,
+  title: '',
+  url: '',
+  type: '',
+  file: null,
   errorText: ''
 });
 const middleDirtyRows = reactive({});
@@ -2216,6 +2248,10 @@ function selectMiddleFileItem(file, index) {
   middleFileModal.selectedIndex = index;
   if (middleFileModal.kind === 'image' && isMiddleImageFile(file)) {
     previewMiddleFileImage(file);
+    return;
+  }
+  if (middleFileModal.kind === 'file') {
+    previewMiddleFile(file);
   }
 }
 
@@ -2239,10 +2275,46 @@ function previewMiddleFileImage(file) {
   isPreviewOpen.value = true;
 }
 
+function previewMiddleFile(file) {
+  const href = getMiddleFileHref(file);
+  if (!href) {
+    middleFileModal.errorText = '当前文件没有可预览地址';
+    return;
+  }
+  middleFilePreviewModal.isOpen = true;
+  middleFilePreviewModal.title = file?.name || '文件预览';
+  middleFilePreviewModal.url = href;
+  middleFilePreviewModal.type = file?.type || '';
+  middleFilePreviewModal.file = file;
+  middleFilePreviewModal.errorText = '';
+}
+
+function closeMiddleFilePreview() {
+  middleFilePreviewModal.isOpen = false;
+  middleFilePreviewModal.title = '';
+  middleFilePreviewModal.url = '';
+  middleFilePreviewModal.type = '';
+  middleFilePreviewModal.file = null;
+  middleFilePreviewModal.errorText = '';
+}
+
+function downloadMiddleFilePreview() {
+  if (!middleFilePreviewModal.file) return;
+  downloadMiddleFileItem(middleFilePreviewModal.file, {
+    fallbackName: middleFilePreviewModal.title || 'download'
+  });
+}
+
 async function handleMiddleFileUpload(event) {
   const files = Array.from(event.target.files || []);
   if (!files.length) return;
   middleFileModal.errorText = '';
+  const validationError = validateMiddleUploadFiles(files);
+  if (validationError) {
+    middleFileModal.errorText = validationError;
+    event.target.value = '';
+    return;
+  }
   try {
     const uploaded = await Promise.all(files.map(file =>
       middleFileModal.kind === 'image' ? readMiddleImageAsWebpItem(file) : readMiddleFileAsItem(file)
@@ -2254,6 +2326,18 @@ async function handleMiddleFileUpload(event) {
   } finally {
     event.target.value = '';
   }
+}
+
+function validateMiddleUploadFiles(files) {
+  if (middleFileModal.kind === 'image') {
+    const invalid = files.filter(file => !String(file.type || '').startsWith('image/'));
+    if (invalid.length) return `图片字段只能上传图片类型：${invalid.map(file => file.name).join('、')}`;
+    return '';
+  }
+
+  const imageFiles = files.filter(file => String(file.type || '').startsWith('image/'));
+  if (imageFiles.length) return `文件字段不能上传图片类型，请改用图片字段：${imageFiles.map(file => file.name).join('、')}`;
+  return '';
 }
 
 function readMiddleFileAsItem(file) {
@@ -2328,19 +2412,30 @@ function toWebpFileName(name) {
 function downloadSelectedMiddleFile() {
   const file = middleFileModal.files[middleFileModal.selectedIndex] || middleFileModal.files[0];
   if (!file) return;
-  const href = file.dataUrl || file.url || file.value || '';
+  downloadMiddleFileItem(file, {
+    forceWebp: middleFileModal.kind === 'image',
+    fallbackName: 'download'
+  });
+}
+
+function downloadMiddleFileItem(file, options = {}) {
+  const href = getMiddleFileHref(file);
   if (!href) {
     middleFileModal.errorText = '当前文件没有可下载地址';
     return;
   }
   const anchor = document.createElement('a');
   anchor.href = href;
-  anchor.download = middleFileModal.kind === 'image'
+  anchor.download = options.forceWebp
     ? toWebpFileName(file.name || file.originalName || 'image')
-    : file.name || 'download';
+    : file.name || options.fallbackName || 'download';
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
+}
+
+function getMiddleFileHref(file) {
+  return file?.dataUrl || file?.url || file?.value || file?.image_url || '';
 }
 
 function deleteSelectedMiddleFile() {
@@ -2671,6 +2766,7 @@ async function saveMiddleTableChanges() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tableName: selectedMiddleTable.value.key,
+        operator: currentUser.value || {},
         inserts,
         updates,
         deletes
