@@ -647,6 +647,9 @@ async function saveMiddlePlatformTableData(payload) {
     let inserted = 0;
     let updated = 0;
     let deleted = 0;
+    const insertedIds = [];
+    const updatedIds = [];
+    const deletedIds = [];
     const errors = [];
 
     await conn.beginTransaction();
@@ -691,6 +694,7 @@ async function saveMiddlePlatformTableData(payload) {
         values
       );
       inserted += result.affectedRows || 0;
+      if (result.insertId) insertedIds.push(result.insertId);
     }
 
     for (let rowIndex = 0; rowIndex < updates.length; rowIndex += 1) {
@@ -736,6 +740,7 @@ async function saveMiddlePlatformTableData(payload) {
           values
         );
         updated += result.affectedRows || 0;
+        if (result.affectedRows) updatedIds.push(primaryValue);
       }
     }
 
@@ -752,6 +757,7 @@ async function saveMiddlePlatformTableData(payload) {
         [primaryValue]
       );
       deleted += result.affectedRows || 0;
+      if (result.affectedRows) deletedIds.push(primaryValue);
     }
 
     if (errors.length) {
@@ -762,7 +768,18 @@ async function saveMiddlePlatformTableData(payload) {
     }
 
     await conn.commit();
-    return { ok: true, inserted, updated, deleted };
+    return {
+      ok: true,
+      tableName,
+      tableLabel: schemaTable.tableComment || tableName,
+      primaryKey: primaryKeyColumn.key,
+      inserted,
+      updated,
+      deleted,
+      insertedIds,
+      updatedIds,
+      deletedIds
+    };
   } catch (error) {
     await conn.rollback?.().catch?.(() => {});
     throw error;

@@ -2182,14 +2182,22 @@ function getMiddleFormulaUpdates() {
   const primaryKey = getMiddlePrimaryColumn();
   const formulaColumns = (table?.columns || []).filter(column => isMiddleFormulaColumn(column) && column.isEditable);
   if (!table || !primaryKey || !formulaColumns.length) return [];
+  const dirtyPrimaryValues = new Set(
+    Object.values(middleDirtyRows)
+      .map(item => String(item?.primaryKey?.value ?? ''))
+      .filter(Boolean)
+  );
 
   return (table.rows || [])
     .filter(row => !row.__isNew && !row.__pendingDelete)
     .map(row => {
       const primaryValue = row[primaryKey];
       if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') return null;
+      if (!dirtyPrimaryValues.has(String(primaryValue))) return null;
       const changes = {};
       for (const column of formulaColumns) {
+        const dirty = middleDirtyRows[getMiddleRowDirtyKey(row)];
+        if (dirty?.changes && Object.prototype.hasOwnProperty.call(dirty.changes, column.key)) continue;
         if (hasMiddleRawFormulaValue(row, column)) continue;
         const value = getMiddleDisplayCellValue(row, column);
         if (String(value ?? '').trim() !== '') changes[column.key] = value;
@@ -2247,15 +2255,31 @@ async function saveMiddleTableChanges() {
         deletes
       })
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || '保存失败');
-    await loadMiddlePlatform();
-    middleSaveStatusText.value = `已保存：新增 ${data.inserted || 0} 行，修改 ${data.updated || 0} 行，删除 ${data.deleted || 0} 行`;
-  } catch (error) {
-    middleErrorText.value = error?.message || String(error);
-  } finally {
-    isMiddleSaving.value = false;
+	    const data = await response.json();
+	    if (!response.ok) throw new Error(data.error || '保存失败');
+	    await loadMiddlePlatform();
+	    middleSaveStatusText.value = formatMiddleSaveStatus(data);
+	  } catch (error) {
+	    middleErrorText.value = error?.message || String(error);
+	  } finally {
+	    isMiddleSaving.value = false;
+	  }
+}
+
+function formatMiddleSaveStatus(data) {
+  const tableName = data.tableName || selectedMiddleTable.value?.databaseName || selectedMiddleTable.value?.key || '';
+  const primaryKey = data.primaryKey || selectedMiddleTable.value?.primaryKey || 'id';
+  const parts = [
+    `已保存：新增 ${data.inserted || 0} 行，修改 ${data.updated || 0} 行，删除 ${data.deleted || 0} 行`
+  ];
+  const idParts = [];
+  if (data.insertedIds?.length) idParts.push(`新增${primaryKey}：${data.insertedIds.join('、')}`);
+  if (data.updatedIds?.length) idParts.push(`修改${primaryKey}：${data.updatedIds.join('、')}`);
+  if (data.deletedIds?.length) idParts.push(`删除${primaryKey}：${data.deletedIds.join('、')}`);
+  if (tableName || idParts.length) {
+    parts.push(`表：${tableName}${idParts.length ? `；${idParts.join('；')}` : ''}`);
   }
+  return parts.join('。');
 }
 
 function getUniqueMiddleValues(key) {
