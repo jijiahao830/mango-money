@@ -2424,7 +2424,7 @@ async function slideMiddleTableToShowCellPopover(trigger) {
   }
 }
 
-function addMiddleRow() {
+async function addMiddleRow() {
   const table = selectedMiddleTable.value;
   if (!table) return;
   clearMiddleFilters();
@@ -2439,6 +2439,18 @@ function addMiddleRow() {
   middleSelectedRowKey.value = row.__draftId;
   middleSaveStatusText.value = '';
   middleErrorText.value = '';
+  await scrollMiddleTableToBottom();
+}
+
+async function scrollMiddleTableToBottom() {
+  await nextTick();
+  const wrap = middleTableWrapRef.value;
+  if (!wrap) return;
+  wrap.scrollTo({
+    top: wrap.scrollHeight,
+    left: wrap.scrollLeft,
+    behavior: 'smooth'
+  });
 }
 
 async function removeMiddleRow() {
