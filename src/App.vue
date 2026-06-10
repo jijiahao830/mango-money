@@ -222,17 +222,30 @@
                   </option>
                 </select>
               </label>
-              <label>
+              <label class="middle-filter-value-control">
                 <span>筛选值</span>
-                <select
-                  v-if="isMiddleMultiFilter"
-                  v-model="middleFilterValues"
-                  multiple
-                  class="middle-filter-multiple"
-                  :disabled="!middleFilterField"
-                >
-                  <option v-for="option in middleFilterOptions" :key="option" :value="option">{{ option }}</option>
-                </select>
+                <template v-if="isMiddleMultiFilter">
+                  <button
+                    class="middle-filter-value-button"
+                    type="button"
+                    :disabled="!middleFilterField"
+                    @click="openMiddleMultiFilter"
+                  >
+                    {{ middleMultiFilterButtonText }}
+                  </button>
+                  <div v-if="isMiddleMultiFilterOpen" class="middle-filter-popover">
+                    <header>
+                      <strong>{{ middleFilterColumn?.label || '筛选值' }}</strong>
+                      <button type="button" class="middle-filter-close" @click="closeMiddleMultiFilter">关闭</button>
+                    </header>
+                    <div class="middle-filter-option-list">
+                      <label v-for="option in middleFilterOptions" :key="option" class="middle-filter-option">
+                        <input v-model="middleFilterDraftValues" type="checkbox" :value="option" />
+                        <span>{{ option }}</span>
+                      </label>
+                    </div>
+                  </div>
+                </template>
                 <select v-else v-model="middleFilterValue" :disabled="!middleFilterField">
                   <option v-if="!middleFilterField" value="">请先选择筛选字段</option>
                   <option value="">全部</option>
@@ -267,7 +280,17 @@
                     <td class="row-index">{{ rowIndex + 1 }}</td>
                     <td v-for="column in selectedMiddleTable.columns" :key="column.key">
                       <select
-                        v-if="column.isEditable && column.enumValues?.length"
+                        v-if="column.isEditable && isMiddleMultiSelectColumn(column)"
+                        v-model="row[column.key]"
+                        multiple
+                        class="middle-cell-input middle-cell-multiple"
+                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
+                        @change="markMiddleCellDirty(row, column.key)"
+                      >
+                        <option v-for="option in column.selectOptions" :key="option" :value="option">{{ option }}</option>
+                      </select>
+                      <select
+                        v-else-if="column.isEditable && column.enumValues?.length"
                         v-model="row[column.key]"
                         class="middle-cell-input"
                         :class="{ changed: isMiddleCellDirty(row, column.key) }"
@@ -1239,6 +1262,8 @@ const middleSearchText = ref('');
 const middleFilterField = ref('');
 const middleFilterValue = ref('');
 const middleFilterValues = ref([]);
+const middleFilterDraftValues = ref([]);
+const isMiddleMultiFilterOpen = ref(false);
 const middleDirtyRows = reactive({});
 const middlePendingDeletes = reactive({});
 const middleSelectedRowKey = ref('');
@@ -1355,8 +1380,15 @@ const isMiddleMultiFilter = computed(() => isMiddleMultiFilterColumn(middleFilte
 const middleFilterOptions = computed(() => {
   const column = middleFilterColumn.value;
   if (!column) return [];
-  if (column.enumValues?.length) return [...column.enumValues];
+  if (isMiddleMultiSelectColumn(column)) return [...column.selectOptions];
+  if (column.enumValues?.length) return [...(column.selectOptions?.length ? column.selectOptions : column.enumValues)];
   return getUniqueMiddleValues(column.key);
+});
+const middleMultiFilterButtonText = computed(() => {
+  if (!middleFilterField.value) return '请先选择筛选字段';
+  if (!middleFilterValues.value.length) return '全部';
+  if (middleFilterValues.value.length <= 2) return middleFilterValues.value.join('、');
+  return `已选择 ${middleFilterValues.value.length} 项`;
 });
 const middleDashboardCards = computed(() => {
   const rows = selectedMiddleTable.value?.rows || [];
@@ -1526,6 +1558,8 @@ watch(filteredMiddleTables, (tables) => {
 watch(middleFilterField, () => {
   middleFilterValue.value = '';
   middleFilterValues.value = [];
+  middleFilterDraftValues.value = [];
+  isMiddleMultiFilterOpen.value = false;
 });
 
 watch(currentUser, (value) => {
@@ -1580,7 +1614,7 @@ async function loadMiddlePlatform() {
     const response = await fetch('/api/middle-platform/tables');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '读取中台数据失败');
-    middleTables.value = data.tables || [];
+    middleTables.value = normalizeMiddleTables(data.tables || []);
     if (!filteredMiddleTables.value.some(table => table.key === activeMiddleTable.value)) {
       activeMiddleTable.value = filteredMiddleTables.value[0]?.key || '';
     }
@@ -1597,12 +1631,44 @@ function clearMiddleFilters() {
   middleFilterField.value = '';
   middleFilterValue.value = '';
   middleFilterValues.value = [];
+  middleFilterDraftValues.value = [];
+  isMiddleMultiFilterOpen.value = false;
 }
 
 function clearMiddleDirtyRows() {
   for (const key of Object.keys(middleDirtyRows)) delete middleDirtyRows[key];
   for (const key of Object.keys(middlePendingDeletes)) delete middlePendingDeletes[key];
   middleSelectedRowKey.value = '';
+}
+
+function openMiddleMultiFilter() {
+  if (!isMiddleMultiFilter.value || !middleFilterField.value) return;
+  middleFilterDraftValues.value = [...middleFilterValues.value];
+  isMiddleMultiFilterOpen.value = true;
+}
+
+function closeMiddleMultiFilter() {
+  middleFilterValues.value = middleFilterDraftValues.value
+    .filter(value => middleFilterOptions.value.includes(value));
+  isMiddleMultiFilterOpen.value = false;
+}
+
+function normalizeMiddleTables(tables) {
+  return tables.map(table => {
+    const multiColumns = (table.columns || []).filter(column => isMiddleMultiSelectColumn(column));
+    if (!multiColumns.length) return table;
+    return {
+      ...table,
+      rows: (table.rows || []).map(row => {
+        const next = { ...row };
+        for (const column of multiColumns) {
+          next[column.key] = parseMiddleFilterValues(next[column.key])
+            .filter(value => column.selectOptions.includes(value));
+        }
+        return next;
+      })
+    };
+  });
 }
 
 function getMiddlePrimaryColumn() {
@@ -1762,6 +1828,15 @@ function validateMiddleChanges() {
       return;
     }
 
+    if (isMiddleMultiSelectColumn(column)) {
+      const values = Array.isArray(value) ? value : parseMiddleFilterValues(value);
+      const invalid = values.filter(item => !column.selectOptions.includes(item));
+      if (invalid.length) {
+        errors.push(`${prefix}${column.label} 只能选择：${column.selectOptions.join('、')}`);
+      }
+      return;
+    }
+
     const raw = String(value ?? '').trim();
     if (!raw) return;
     if (column.enumValues?.length && !column.enumValues.includes(raw)) {
@@ -1805,7 +1880,7 @@ function getMiddleInsertChanges(row) {
   for (const column of selectedMiddleTable.value?.columns || []) {
     if (!column.isEditable) continue;
     const value = row[column.key];
-    if (String(value ?? '').trim() !== '') {
+    if (Array.isArray(value) ? value.length > 0 : String(value ?? '').trim() !== '') {
       changes[column.key] = value;
     }
   }
@@ -1864,8 +1939,12 @@ function isMiddleSingleFilterColumn(column) {
 }
 
 function isMiddleMultiFilterColumn(column) {
-  if (!column) return false;
-  if (column.enumValues?.length) return false;
+  return isMiddleMultiSelectColumn(column);
+}
+
+function isMiddleMultiSelectColumn(column) {
+  if (!column || column.enumValues?.length) return false;
+  if (!Array.isArray(column.selectOptions) || !column.selectOptions.length) return false;
   const dataType = String(column.dataType || '').toLowerCase();
   const columnType = String(column.columnType || '').toLowerCase();
   return dataType === 'json' || columnType === 'json';

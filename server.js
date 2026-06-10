@@ -1252,15 +1252,24 @@ async function getSchemaTables(conn) {
     ORDER BY TABLE_NAME, ORDINAL_POSITION
   `);
 
+  const wecomSelectOptions = await getWecomSelectOptionsByDbField();
+  const tableCommentByName = new Map(tableRows.map(table => [table.tableName, table.tableComment || '']));
   const columnsByTable = new Map();
   for (const column of columnRows) {
     if (!columnsByTable.has(column.tableName)) columnsByTable.set(column.tableName, []);
+    const enumValues = parseEnumValues(column.columnType);
+    const selectOptions = getSelectOptionsForColumn(
+      wecomSelectOptions,
+      tableCommentByName.get(column.tableName),
+      column.columnComment || column.columnName
+    );
     columnsByTable.get(column.tableName).push({
       key: column.columnName,
       label: column.columnComment || column.columnName,
       dataType: column.dataType,
       columnType: column.columnType,
-      enumValues: parseEnumValues(column.columnType),
+      enumValues,
+      selectOptions: selectOptions.length ? selectOptions : enumValues,
       isNullable: column.isNullable === 'YES',
       columnKey: column.columnKey || '',
       extra: column.extra || '',
@@ -1284,6 +1293,71 @@ function parseJsonArray(value) {
   } catch {
     return [];
   }
+}
+
+async function getWecomSelectOptionsByDbField() {
+  const filePath = path.join(RUNTIME_DIR, 'wecom_select_fields.json');
+  const raw = await fsp.readFile(filePath, 'utf8').catch(() => '');
+  if (!raw) return new Map();
+
+  let fields = [];
+  try {
+    fields = JSON.parse(raw);
+  } catch {
+    return new Map();
+  }
+
+  const optionsByField = new Map();
+  for (const field of fields) {
+    if (field.sheet_visible === false) continue;
+    const options = uniqueStrings((field.options || []).map(option => option.name || option.text || option.value || option.label || option));
+    if (!options.length) continue;
+    const tableName = cleanWecomSheetTitle(field.sheet_title || '');
+    const key = `${normalizeSchemaLabel(tableName)}::${normalizeSchemaLabel(field.field_title || '')}`;
+    optionsByField.set(key, options);
+  }
+  return optionsByField;
+}
+
+function getSelectOptionsForColumn(optionsByField, tableComment, columnComment) {
+  const key = `${normalizeSchemaLabel(tableComment || '')}::${normalizeSchemaLabel(columnComment || '')}`;
+  return optionsByField.get(key) || [];
+}
+
+function cleanWecomSheetTitle(value) {
+  return String(value || '')
+    .replace(/（.*?）|\(.*?\)/g, '')
+    .replace(/车辆维修成本表/g, '维修成本表')
+    .replace(/保险&续费记录/g, '保险续费记录')
+    .trim();
+}
+
+function normalizeSchemaLabel(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[：:，,。；;、（）()[\]【】&]/g, '')
+    .replace(/台帐/g, '台账')
+    .replace(/帐/g, '账')
+    .replace(/对帐/g, '对账')
+    .replace(/车辆维修成本表/g, '维修成本表')
+    .replace(/车辆异常ing/g, '车辆异常')
+    .replace(/保险续费记录/g, '保险续费记录')
+    .replace(/保险续费记录/g, '保险续费记录')
+    .replace(/车队长是填写完成/g, '车队长是否填写完成')
+    .replace(/表$/, '')
+    .toLowerCase();
+}
+
+function uniqueStrings(values) {
+  const result = [];
+  const seen = new Set();
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+  }
+  return result;
 }
 
 function parseEnumValues(columnType) {
@@ -1335,6 +1409,14 @@ function normalizeMiddleCellValue(column, rawValue) {
     return { error: `只能选择：${column.enumValues.join('、')}` };
   }
 
+  if (isJsonSelectColumn(column)) {
+    const values = parseSubmittedMultiSelectValue(rawValue);
+    const invalid = values.filter(item => !column.selectOptions.includes(item));
+    if (invalid.length) return { error: `只能选择：${column.selectOptions.join('、')}` };
+    if (!values.length) return column.isNullable ? { value: null } : { value: JSON.stringify([]) };
+    return { value: JSON.stringify(values) };
+  }
+
   if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint'].includes(column.dataType)) {
     if (!/^-?\d+$/.test(value)) return { error: '只能填写整数' };
     return { value: Number(value) };
@@ -1358,6 +1440,23 @@ function normalizeMiddleCellValue(column, rawValue) {
   }
 
   return { value };
+}
+
+function isJsonSelectColumn(column) {
+  return column?.dataType === 'json' && Array.isArray(column.selectOptions) && column.selectOptions.length > 0;
+}
+
+function parseSubmittedMultiSelectValue(value) {
+  if (Array.isArray(value)) return uniqueStrings(value);
+  if (value === undefined || value === null || value === '') return [];
+
+  const text = String(value).trim();
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return uniqueStrings(parsed);
+  } catch {}
+  return uniqueStrings(text.split(/[,，、;；\n\r]+/g));
 }
 
 function formatSelectColumn(column) {
