@@ -1044,27 +1044,27 @@
 		                  <span class="field-check-title">{{ column.label }}</span>
 		                  <small>
 		                    {{ column.key }}
-		                    <button
-		                      class="field-kind-tag"
-		                      type="button"
-		                      @click.prevent.stop="toggleFieldKind(column)"
-		                    >
-		                      {{ getFieldKindLabel(column) }}
-		                    </button>
+	                    <button
+	                      class="field-kind-tag"
+	                      type="button"
+	                      @click.prevent.stop="openFieldKindMenu(selectedTableConfig, column, $event)"
+	                    >
+	                      {{ getFieldKindLabel(column) }}
+	                    </button>
 		                  </small>
 	                </span>
 	                <span class="field-check-actions">
-	                  <button
-	                    v-if="isTableConfigFormulaCandidate(column)"
-	                    class="secondary field-config-button"
-	                    type="button"
-	                    @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
-	                  >
-	                    公式
-	                  </button>
-	                  <button
-	                    v-if="isTableConfigSelectableColumn(column)"
-	                    class="secondary field-config-button"
+		                  <button
+		                    v-if="shouldShowFormulaButton(column)"
+		                    class="secondary field-config-button"
+		                    type="button"
+		                    @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
+		                  >
+		                    公式
+		                  </button>
+		                  <button
+		                    v-if="shouldShowFieldOptionButton(column)"
+		                    class="secondary field-config-button"
 	                    type="button"
 	                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
 	                  >
@@ -1086,9 +1086,9 @@
 
         <p v-if="tableConfigStatusText" class="status-text">{{ tableConfigStatusText }}</p>
         <p v-if="tableConfigErrorText" class="error-text">{{ tableConfigErrorText }}</p>
-      </section>
+	      </section>
 
-      <section v-else-if="activePage === 'push'" class="account-page">
+	      <section v-else-if="activePage === 'push'" class="account-page">
         <header class="section-title-row">
           <div>
             <h1>推送配置</h1>
@@ -1116,7 +1116,25 @@
 
       <section v-else class="workspace-page"></section>
     </section>
-  </main>
+	  </main>
+
+	  <div
+	    v-if="fieldKindMenu.isOpen"
+	    class="field-kind-menu"
+	    :style="fieldKindMenuStyle"
+	    @click.stop
+	  >
+	    <button
+	      v-for="option in fieldKindOptions"
+	      :key="option.value"
+	      type="button"
+	      :class="{ active: option.value === fieldKindMenu.currentKind }"
+	      @click="selectFieldKind(option.value)"
+	    >
+	      <span>{{ option.value === fieldKindMenu.currentKind ? '✓' : '' }}</span>
+	      {{ option.label }}
+	    </button>
+	  </div>
 
 	  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
 	    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
@@ -1536,6 +1554,14 @@ const fieldOptionConfig = reactive({
   sourceColumnName: '',
   originalSourceColumnName: ''
 });
+const fieldKindMenu = reactive({
+  isOpen: false,
+  tableName: '',
+  columnKey: '',
+  currentKind: '',
+  left: 0,
+  top: 0
+});
 const formulaConfig = reactive({
   isOpen: false,
   tableName: '',
@@ -1626,6 +1652,10 @@ const fieldOptionSourceColumns = computed(() => {
   const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.sourceTableName);
   return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
 });
+const fieldKindMenuStyle = computed(() => ({
+  left: `${fieldKindMenu.left}px`,
+  top: `${fieldKindMenu.top}px`
+}));
 const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
 const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
 const displayedTableConfigItems = computed(() =>
@@ -1786,11 +1816,13 @@ watch(balanceReceivedAt, (value) => {
 
 onMounted(() => {
   window.addEventListener('resize', syncMiddleSidebarHeight);
+  window.addEventListener('click', closeFieldKindMenu);
   nextTick(observeMiddleContentHeight);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', syncMiddleSidebarHeight);
+  window.removeEventListener('click', closeFieldKindMenu);
   middleResizeObserver?.disconnect();
 });
 
@@ -2164,6 +2196,7 @@ function cancelConfirmDialog() {
 }
 
 function middleInputType(column) {
+  if (getFieldKind(column) === 'date') return 'date';
   if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint', 'decimal', 'float', 'double'].includes(column.dataType)) return 'number';
   if (column.dataType === 'date') return 'date';
   return 'text';
@@ -2444,6 +2477,7 @@ function toFormulaNumber(value) {
 }
 
 function isMiddleFileLikeColumn(column) {
+  if (['image', 'file'].includes(column?.fieldKind)) return true;
   const text = `${column?.key || ''} ${column?.label || ''}`.toLowerCase();
   return [
     'file',
@@ -3089,23 +3123,54 @@ function getFieldKindLabel(column) {
   return fieldKindOptions.find(option => option.value === kind)?.label || '文本';
 }
 
-function toggleFieldKind(column) {
-  const current = getFieldKind(column);
-  const index = fieldKindOptions.findIndex(option => option.value === current);
-  const next = fieldKindOptions[(index + 1) % fieldKindOptions.length];
-  column.fieldKind = next.value;
-  if (next.value === 'single') {
+function shouldShowFormulaButton(column) {
+  return getFieldKind(column) === 'calc' && isTableConfigFormulaCandidate(column);
+}
+
+function shouldShowFieldOptionButton(column) {
+  return ['single', 'multi', 'relation'].includes(getFieldKind(column));
+}
+
+function openFieldKindMenu(table, column, event) {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const menuWidth = 96;
+  fieldKindMenu.isOpen = true;
+  fieldKindMenu.tableName = table.tableName;
+  fieldKindMenu.columnKey = column.key;
+  fieldKindMenu.currentKind = getFieldKind(column);
+  fieldKindMenu.left = Math.round(Math.min(rect.left, window.innerWidth - menuWidth - 8));
+  fieldKindMenu.top = Math.round(rect.bottom + 6);
+}
+
+function closeFieldKindMenu() {
+  fieldKindMenu.isOpen = false;
+}
+
+function selectFieldKind(kind) {
+  const table = tableConfigItems.value.find(item => item.tableName === fieldKindMenu.tableName);
+  const column = table?.columns?.find(item => item.key === fieldKindMenu.columnKey);
+  if (!column) {
+    closeFieldKindMenu();
+    return;
+  }
+  column.fieldKind = kind;
+  if (kind === 'single') {
     column.enumValues = column.enumValues || [];
     column.selectOptions = column.selectOptions || [];
   }
-  if (next.value === 'multi') {
+  if (kind === 'multi') {
     column.selectOptions = column.selectOptions || [];
   }
-  if (next.value === 'calc' && !column.formulaConfig) {
+  if (kind === 'relation') {
+    column.selectOptions = column.selectOptions || [];
+    column.optionConfig = column.optionConfig || { type: 'table', sourceTableName: '', sourceColumnName: '' };
+  }
+  if (kind === 'calc' && !column.formulaConfig) {
     column.formulaConfig = { expression: '', dependencies: [], isEnabled: false };
   }
   tableConfigStatusText.value = '字段类型标签已更新，点击保存配置后生效';
   tableConfigErrorText.value = '';
+  closeFieldKindMenu();
 }
 
 function getTableConfigColumnOptions(column) {
@@ -3255,6 +3320,7 @@ function applyFormulaConfig() {
       dependencies: extractFormulaExpressionTokens(expression),
       isEnabled: true
     };
+    column.fieldKind = 'calc';
   }
   tableConfigStatusText.value = '公式配置已更新，点击保存配置后生效';
   tableConfigErrorText.value = '';

@@ -1628,6 +1628,7 @@ function attachFormulaConfigsToColumns(table, formulaConfigs) {
     if (!config) return column;
     return {
       ...column,
+      fieldKind: column.fieldKind || 'calc',
       formulaConfig: {
         expression: config.expression,
         dependencies: config.dependencies,
