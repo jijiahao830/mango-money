@@ -569,6 +569,12 @@ h1 {
   box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.12);
 }
 
+.middle-cell-input.calculated {
+  border-color: #14b8a6;
+  color: #0f766e;
+  font-weight: 600;
+}
+
 .middle-data-table .row-index {
   position: sticky;
   left: 0;

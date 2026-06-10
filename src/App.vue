@@ -279,13 +279,21 @@
                   >
 	                    <td class="row-index">{{ rowIndex + 1 }}</td>
 	                    <td v-for="column in selectedMiddleTable.columns" :key="column.key">
-	                      <span
-	                        v-if="isMiddleFormulaColumn(column)"
-	                        class="middle-formula-value"
-	                        :class="{ calculated: isMiddleFormulaCalculated(row, column) }"
-	                      >
-	                        {{ formatMiddleValue(column.key, getMiddleDisplayCellValue(row, column)) }}
-	                      </span>
+		                      <input
+		                        v-if="isMiddleFormulaColumn(column) && column.isEditable"
+		                        class="middle-cell-input"
+		                        :class="{ changed: isMiddleCellDirty(row, column.key), calculated: isMiddleFormulaCalculated(row, column) }"
+		                        :type="middleInputType(column)"
+		                        :value="getMiddleDisplayCellValue(row, column)"
+		                        @input="updateMiddleFormulaCell(row, column, $event.target.value)"
+		                      />
+		                      <span
+		                        v-else-if="isMiddleFormulaColumn(column)"
+		                        class="middle-formula-value"
+		                        :class="{ calculated: isMiddleFormulaCalculated(row, column) }"
+		                      >
+		                        {{ formatMiddleValue(column.key, getMiddleDisplayCellValue(row, column)) }}
+		                      </span>
 	                      <div
 	                        v-else-if="column.isEditable && isMiddleMultiSelectColumn(column)"
 	                        class="middle-cell-multi-wrap"
@@ -2291,6 +2299,12 @@ function getMiddleDisplayCellValue(row, column) {
   if (hasMiddleRawFormulaValue(row, column)) return row.__formulaRaw[column.key];
   const calculated = calculateMiddleFormulaValue(row, column);
   return calculated === '' ? row?.[column.key] : calculated;
+}
+
+function updateMiddleFormulaCell(row, column, value) {
+  row[column.key] = value;
+  if (row.__formulaRaw) row.__formulaRaw[column.key] = value;
+  markMiddleCellDirty(row, column.key);
 }
 
 function calculateMiddleFormulaValue(row, column) {
