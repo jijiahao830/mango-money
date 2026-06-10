@@ -1862,6 +1862,9 @@ function buildMiddleTableOrderSql(tableName, columns) {
   if (tableName === 'cw_cxcsb' && columnKeys.has('vehicle_id')) {
     return 'ORDER BY vehicle_id + 0, vehicle_id, plate_number';
   }
+  if (tableName === 'cw_ndlrb' && columnKeys.has('rq')) {
+    return 'ORDER BY rq ASC, id ASC';
+  }
   if (columnKeys.has('create_time')) return 'ORDER BY create_time DESC';
   if (columnKeys.has('id')) return 'ORDER BY id DESC';
   return '';
