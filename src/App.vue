@@ -260,7 +260,7 @@
               <span>筛选不会修改数据库，只影响当前看板显示。</span>
             </div>
 
-            <div class="middle-table-wrap">
+            <div ref="middleTableWrapRef" class="middle-table-wrap">
               <table class="middle-data-table">
                 <thead>
                   <tr>
@@ -287,7 +287,7 @@
                           class="middle-cell-input middle-cell-multi-button"
                           :class="{ changed: isMiddleCellDirty(row, column.key) }"
                           type="button"
-                          @click.stop="openMiddleCellMultiSelect(row, rowIndex, column)"
+                          @click.stop="openMiddleCellMultiSelect(row, rowIndex, column, $event)"
                         >
                           <span>{{ formatMiddleMultiCellValue(row[column.key]) || '空' }}</span>
                         </button>
@@ -298,9 +298,14 @@
                         >
                           <header>
                             <strong>{{ column.label }}</strong>
-                            <button type="button" class="middle-filter-close" @click="closeMiddleCellMultiSelect">
-                              关闭
-                            </button>
+                            <div class="middle-cell-popover-actions">
+                              <button type="button" class="middle-filter-close" @click="saveMiddleCellMultiSelect">
+                                保存
+                              </button>
+                              <button type="button" class="middle-filter-close" @click="closeMiddleCellMultiSelect">
+                                关闭
+                              </button>
+                            </div>
                           </header>
                           <div class="middle-filter-option-list">
                             <label v-for="option in column.selectOptions" :key="option" class="middle-filter-option">
@@ -1309,6 +1314,7 @@ const healthErrorText = ref('');
 const middleTables = ref([]);
 const activeMiddleTable = ref('cw_cxcsb');
 const middleContentRef = ref(null);
+const middleTableWrapRef = ref(null);
 const middleSidebarHeight = ref('');
 const isMiddleLoading = ref(false);
 const isMiddleSaving = ref(false);
@@ -1812,13 +1818,14 @@ function formatMiddleMultiCellValue(value) {
   return parseMiddleFilterValues(value).join('、');
 }
 
-function openMiddleCellMultiSelect(row, rowIndex, column) {
+function openMiddleCellMultiSelect(row, rowIndex, column, event) {
   const rowKey = getMiddleRowRenderKey(row, rowIndex);
   middleCellMultiSelect.rowKey = rowKey;
   middleCellMultiSelect.field = column.key;
   middleCellMultiSelect.row = row;
   middleCellMultiDraftValues.value = parseMiddleFilterValues(row[column.key])
     .filter(value => column.selectOptions.includes(value));
+  slideMiddleTableToShowCellPopover(event?.currentTarget);
 }
 
 function isMiddleCellMultiSelectOpen(row, rowIndex, column) {
@@ -1826,7 +1833,7 @@ function isMiddleCellMultiSelectOpen(row, rowIndex, column) {
     && middleCellMultiSelect.field === column.key;
 }
 
-function closeMiddleCellMultiSelect() {
+function saveMiddleCellMultiSelect() {
   const row = middleCellMultiSelect.row;
   const field = middleCellMultiSelect.field;
   const column = selectedMiddleTable.value?.columns?.find(item => item.key === field);
@@ -1835,6 +1842,32 @@ function closeMiddleCellMultiSelect() {
     markMiddleCellDirty(row, field);
   }
   clearMiddleCellMultiSelect();
+}
+
+function closeMiddleCellMultiSelect() {
+  clearMiddleCellMultiSelect();
+}
+
+async function slideMiddleTableToShowCellPopover(trigger) {
+  await nextTick();
+  const wrap = middleTableWrapRef.value || trigger?.closest?.('.middle-table-wrap');
+  const popover = trigger?.closest?.('.middle-cell-multi-wrap')?.querySelector?.('.middle-cell-popover');
+  if (!wrap || !popover) return;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const wrapRect = wrap.getBoundingClientRect();
+    const popoverRect = popover.getBoundingClientRect();
+    const rightOverflow = popoverRect.right - wrapRect.right + 14;
+    if (rightOverflow <= 0) return;
+
+    const nextLeft = Math.min(
+      wrap.scrollLeft + rightOverflow,
+      wrap.scrollWidth - wrap.clientWidth
+    );
+    if (nextLeft <= wrap.scrollLeft) return;
+    wrap.scrollLeft = nextLeft;
+    await nextTick();
+  }
 }
 
 function addMiddleRow() {

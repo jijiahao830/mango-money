@@ -408,6 +408,11 @@ h1 {
   font-size: 12px;
 }
 
+.middle-cell-popover-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .middle-filter-option-list {
   display: grid;
   gap: 6px;
@@ -466,6 +471,7 @@ h1 {
   position: relative;
   overflow: auto;
   max-height: 620px;
+  padding-right: 300px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #ffffff;
