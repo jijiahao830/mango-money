@@ -1219,8 +1219,26 @@
 	      </header>
 
 	      <div class="middle-file-preview-stage">
+	        <div
+	          v-if="middleFilePreviewModal.previewKind === 'excel' && middleFilePreviewModal.excelRows.length"
+	          class="middle-excel-preview"
+	        >
+	          <table>
+	            <tbody>
+	              <tr v-for="(row, rowIndex) in middleFilePreviewModal.excelRows" :key="rowIndex">
+	                <td
+	                  v-for="(cell, cellIndex) in row"
+	                  :key="`${rowIndex}-${cellIndex}`"
+	                  :class="{ header: rowIndex === 0 }"
+	                >
+	                  {{ cell }}
+	                </td>
+	              </tr>
+	            </tbody>
+	          </table>
+	        </div>
 	        <iframe
-	          v-if="middleFilePreviewModal.canPreview && middleFilePreviewModal.url"
+	          v-else-if="middleFilePreviewModal.canPreview && middleFilePreviewModal.url"
 	          :src="middleFilePreviewModal.url"
 	          :title="middleFilePreviewModal.title"
 	        ></iframe>
@@ -1451,6 +1469,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import * as XLSX from 'xlsx';
 import { pageRoutes } from './router';
 import orangeLogo from './assets/logo.webp';
 import topLogo from './assets/top-logo.webp';
@@ -1651,6 +1670,8 @@ const middleFilePreviewModal = reactive({
   url: '',
   type: '',
   file: null,
+  previewKind: '',
+  excelRows: [],
   canPreview: false,
   errorText: ''
 });
@@ -2358,20 +2379,31 @@ function previewMiddleFileImage(file) {
   isPreviewOpen.value = true;
 }
 
-function previewMiddleFile(file) {
+async function previewMiddleFile(file) {
   const href = getMiddleFileHref(file);
   if (!href) {
     middleFileModal.errorText = '当前文件没有可预览地址';
     return;
   }
+  const isExcel = isMiddleExcelFile(file);
   const canPreview = canPreviewMiddleFile(file);
   middleFilePreviewModal.isOpen = true;
   middleFilePreviewModal.title = file?.name || '文件预览';
   middleFilePreviewModal.url = href;
   middleFilePreviewModal.type = file?.type || '';
   middleFilePreviewModal.file = file;
-  middleFilePreviewModal.canPreview = canPreview;
-  middleFilePreviewModal.errorText = canPreview ? '' : '当前文件类型暂不支持在线预览';
+  middleFilePreviewModal.previewKind = isExcel ? 'excel' : '';
+  middleFilePreviewModal.excelRows = [];
+  middleFilePreviewModal.canPreview = !isExcel && canPreview;
+  middleFilePreviewModal.errorText = isExcel ? '正在读取 Excel 文件...' : (canPreview ? '' : '当前文件类型暂不支持在线预览');
+  if (isExcel) {
+    try {
+      middleFilePreviewModal.excelRows = await readMiddleExcelPreviewRows(file);
+      middleFilePreviewModal.errorText = middleFilePreviewModal.excelRows.length ? '' : 'Excel 文件中没有可显示的数据';
+    } catch (error) {
+      middleFilePreviewModal.errorText = error?.message || 'Excel 文件解析失败';
+    }
+  }
 }
 
 function closeMiddleFilePreview() {
@@ -2380,6 +2412,8 @@ function closeMiddleFilePreview() {
   middleFilePreviewModal.url = '';
   middleFilePreviewModal.type = '';
   middleFilePreviewModal.file = null;
+  middleFilePreviewModal.previewKind = '';
+  middleFilePreviewModal.excelRows = [];
   middleFilePreviewModal.canPreview = false;
   middleFilePreviewModal.errorText = '';
 }
@@ -2522,6 +2556,55 @@ function downloadMiddleFileItem(file, options = {}) {
 
 function getMiddleFileHref(file) {
   return file?.dataUrl || file?.url || file?.value || file?.image_url || '';
+}
+
+function isMiddleExcelFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || file?.url || '').toLowerCase();
+  return [
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-excel.sheet.macroenabled.12'
+  ].includes(type) || ['.xlsx', '.xls', '.xlsm', '.csv'].some(ext => name.endsWith(ext));
+}
+
+async function readMiddleExcelPreviewRows(file) {
+  const href = getMiddleFileHref(file);
+  const buffer = href.startsWith('data:')
+    ? dataUrlToArrayBuffer(href)
+    : await fetch(href).then(response => {
+        if (!response.ok) throw new Error('Excel 文件下载失败');
+        return response.arrayBuffer();
+      });
+  const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+    header: 1,
+    blankrows: false,
+    defval: ''
+  });
+  const normalizedRows = rows
+    .slice(0, 200)
+    .map(row => row.map(cell => formatMiddleExcelCell(cell)));
+  const maxColumns = Math.min(50, normalizedRows.reduce((max, row) => Math.max(max, row.length), 0));
+  return normalizedRows.map(row => Array.from({ length: maxColumns }, (_, index) => row[index] ?? ''));
+}
+
+function dataUrlToArrayBuffer(dataUrl) {
+  const base64 = String(dataUrl).split(',')[1] || '';
+  const binary = window.atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes.buffer;
+}
+
+function formatMiddleExcelCell(value) {
+  if (value instanceof Date) return value.toLocaleDateString('zh-CN');
+  if (value === null || value === undefined) return '';
+  return String(value);
 }
 
 function canPreviewMiddleFile(file) {
