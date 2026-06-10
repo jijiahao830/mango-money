@@ -659,52 +659,53 @@ h1 {
 .middle-pagination {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   margin-left: 4px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  background: #1f1f1f;
+  padding: 0;
+  background: transparent;
 }
 
 .middle-page-arrow {
   min-width: 0;
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   margin: 0;
   padding: 0;
-  border: 0;
-  border-radius: 4px;
-  color: #d1d5db;
-  background: transparent;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  color: #111827;
+  background: #ffffff;
   font-size: 20px;
   font-weight: 800;
+  line-height: 1;
 }
 
 .middle-page-arrow:hover:not(:disabled) {
-  color: #ffffff;
-  background: #343434;
+  border-color: #94a3b8;
+  background: #f8fafc;
 }
 
 .middle-page-arrow:disabled {
   opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .middle-page-input {
-  width: 64px;
+  width: 58px;
   height: 30px;
   min-width: 0;
   padding: 4px 8px;
-  border: 1px solid #3f3f46;
-  border-radius: 0;
-  color: #ffffff;
-  background: #2b2b2b;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #111827;
+  background: #ffffff;
   font-size: 16px;
   font-weight: 700;
   text-align: left;
 }
 
 .middle-page-total {
-  color: #d1d5db;
+  color: #475569;
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
