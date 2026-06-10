@@ -222,17 +222,19 @@
                   </option>
                 </select>
               </label>
-              <label v-if="middleFilterField">
+              <label>
                 <span>筛选值</span>
                 <select
                   v-if="isMiddleMultiFilter"
                   v-model="middleFilterValues"
                   multiple
                   class="middle-filter-multiple"
+                  :disabled="!middleFilterField"
                 >
                   <option v-for="option in middleFilterOptions" :key="option" :value="option">{{ option }}</option>
                 </select>
-                <select v-else v-model="middleFilterValue">
+                <select v-else v-model="middleFilterValue" :disabled="!middleFilterField">
+                  <option v-if="!middleFilterField" value="">请先选择筛选字段</option>
                   <option value="">全部</option>
                   <option v-for="option in middleFilterOptions" :key="option" :value="option">{{ option }}</option>
                 </select>
@@ -1343,6 +1345,7 @@ const selectedMiddleRows = computed(() => {
 const middleFilterColumns = computed(() =>
   (selectedMiddleTable.value?.columns || [])
     .filter(column => !['id', 'create_time', 'update_time'].includes(column.key))
+    .filter(column => isMiddleSingleFilterColumn(column) || isMiddleMultiFilterColumn(column))
 );
 const middleFilterColumn = computed(() =>
   middleFilterColumns.value.find(column => column.key === middleFilterField.value) || null
@@ -1853,6 +1856,10 @@ function getUniqueMiddleValues(key) {
   return [...new Set(rows.flatMap(row => parseMiddleFilterValues(row[key])).filter(Boolean))].sort((a, b) =>
     String(a).localeCompare(String(b), 'zh-CN')
   );
+}
+
+function isMiddleSingleFilterColumn(column) {
+  return Boolean(column?.enumValues?.length);
 }
 
 function isMiddleMultiFilterColumn(column) {
