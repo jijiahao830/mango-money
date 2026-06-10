@@ -169,16 +169,18 @@
             <span>搜索表格</span>
             <input v-model="middleTableSearchText" placeholder="输入表名或显示名" />
           </label>
-          <button
-            v-for="table in filteredMiddleTables"
-            :key="table.key"
-            class="middle-table-tab"
-            :class="{ active: activeMiddleTable === table.key }"
-            type="button"
-            @click="selectMiddleTable(table.key)"
-          >
-            <span>{{ table.label }}</span>
-          </button>
+          <div class="sidebar-scroll-list">
+            <button
+              v-for="table in filteredMiddleTables"
+              :key="table.key"
+              class="middle-table-tab"
+              :class="{ active: activeMiddleTable === table.key }"
+              type="button"
+              @click="selectMiddleTable(table.key)"
+            >
+              <span>{{ table.label }}</span>
+            </button>
+          </div>
         </aside>
 
         <section class="middle-content">
@@ -911,25 +913,27 @@
               <span>搜索表格</span>
               <input v-model="tableConfigSearchText" placeholder="输入表名或显示名" />
             </label>
-            <button
-              v-for="table in filteredTableConfigItems"
-              :key="table.tableName"
-              class="middle-table-tab"
-              :class="{ active: activeTableConfigName === table.tableName }"
-              type="button"
-              @click="selectTableConfig(table.tableName)"
-            >
-              <span>{{ table.tableLabel || table.tableName }}</span>
-              <strong v-if="table.isVisible">显示</strong>
-            </button>
-            <button
-              class="middle-table-tab table-directory-tab"
-              type="button"
-              @click="toggleTableConfigDirectory"
-            >
-              <span>{{ tableConfigDirectoryLabel }}</span>
-              <strong>{{ tableConfigDirectoryCount }}</strong>
-            </button>
+            <div class="sidebar-scroll-list">
+              <button
+                v-for="table in filteredTableConfigItems"
+                :key="table.tableName"
+                class="middle-table-tab"
+                :class="{ active: activeTableConfigName === table.tableName }"
+                type="button"
+                @click="selectTableConfig(table.tableName)"
+              >
+                <span>{{ table.tableLabel || table.tableName }}</span>
+                <strong v-if="table.isVisible">显示</strong>
+              </button>
+              <button
+                class="middle-table-tab table-directory-tab"
+                type="button"
+                @click="toggleTableConfigDirectory"
+              >
+                <span>{{ tableConfigDirectoryLabel }}</span>
+                <strong>{{ tableConfigDirectoryCount }}</strong>
+              </button>
+            </div>
           </aside>
 
           <section v-if="selectedTableConfig" class="card table-management-panel">
