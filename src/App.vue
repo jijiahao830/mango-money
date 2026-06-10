@@ -330,16 +330,16 @@
                           </div>
                         </div>
                       </div>
-                      <select
-                        v-else-if="column.isEditable && column.enumValues?.length"
-                        v-model="row[column.key]"
-                        class="middle-cell-input"
-                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
-                        @change="markMiddleCellDirty(row, column.key)"
-                      >
-                        <option value="">空</option>
-                        <option v-for="option in column.enumValues" :key="option" :value="option">{{ option }}</option>
-                      </select>
+	                      <select
+	                        v-else-if="column.isEditable && isMiddleSingleSelectColumn(column)"
+	                        v-model="row[column.key]"
+	                        class="middle-cell-input"
+	                        :class="{ changed: isMiddleCellDirty(row, column.key) }"
+	                        @change="markMiddleCellDirty(row, column.key)"
+	                      >
+	                        <option value="">空</option>
+	                        <option v-for="option in getMiddleSingleSelectOptions(column)" :key="option" :value="option">{{ option }}</option>
+	                      </select>
                       <input
                         v-else-if="column.isEditable"
                         v-model="row[column.key]"
@@ -1122,10 +1122,50 @@
         <button class="secondary tool-button" type="button" @click="closeFieldOptionConfig">关闭</button>
       </header>
 
-      <label class="field-option-editor">
-        <span>选项值（一行一个）</span>
-        <textarea v-model="fieldOptionConfig.optionText" rows="10" placeholder="每行填写一个选项"></textarea>
-      </label>
+	      <div class="field-option-mode">
+	        <label>
+	          <input v-model="fieldOptionConfig.mode" type="radio" value="static" />
+	          <span>固定选项</span>
+	        </label>
+	        <label>
+	          <input v-model="fieldOptionConfig.mode" type="radio" value="table" />
+	          <span>从数据表读取</span>
+	        </label>
+	      </div>
+
+	      <label v-if="fieldOptionConfig.mode === 'static'" class="field-option-editor">
+	        <span>选项值（一行一个）</span>
+	        <textarea v-model="fieldOptionConfig.optionText" rows="10" placeholder="每行填写一个选项"></textarea>
+	      </label>
+
+	      <div v-else class="formula-builder-grid">
+	        <label>
+	          <span>来源表</span>
+	          <select v-model="fieldOptionConfig.sourceTableName">
+	            <option value="">选择表</option>
+	            <option
+	              v-for="table in fieldOptionSourceTables"
+	              :key="table.tableName"
+	              :value="table.tableName"
+	            >
+	              {{ table.tableLabel || table.tableName }}
+	            </option>
+	          </select>
+	        </label>
+	        <label>
+	          <span>来源字段</span>
+	          <select v-model="fieldOptionConfig.sourceColumnName" :disabled="!fieldOptionConfig.sourceTableName">
+	            <option value="">选择字段</option>
+	            <option
+	              v-for="column in fieldOptionSourceColumns"
+	              :key="column.key"
+	              :value="column.key"
+	            >
+	              {{ column.label }}（{{ column.key }}）
+	            </option>
+	          </select>
+	        </label>
+	      </div>
 
       <div class="modal-footer">
         <button type="button" @click="applyFieldOptionConfig">保存字段配置</button>
@@ -1472,7 +1512,13 @@ const fieldOptionConfig = reactive({
   columnLabel: '',
   typeLabel: '',
   optionText: '',
-  originalOptionText: ''
+  originalOptionText: '',
+  mode: 'static',
+  originalMode: 'static',
+  sourceTableName: '',
+  originalSourceTableName: '',
+  sourceColumnName: '',
+  originalSourceColumnName: ''
 });
 const formulaConfig = reactive({
   isOpen: false,
@@ -1559,6 +1605,11 @@ const formulaForeignColumns = computed(() => {
   const table = tableConfigItems.value.find(item => item.tableName === formulaConfig.foreignTableName);
   return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
 });
+const fieldOptionSourceTables = computed(() => tableConfigItems.value);
+const fieldOptionSourceColumns = computed(() => {
+  const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.sourceTableName);
+  return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
+});
 const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
 const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
 const displayedTableConfigItems = computed(() =>
@@ -1604,11 +1655,11 @@ const middleFilterColumn = computed(() =>
 const isMiddleMultiFilter = computed(() => isMiddleMultiFilterColumn(middleFilterColumn.value));
 const middleFilterOptions = computed(() => {
   const column = middleFilterColumn.value;
-  if (!column) return [];
-  if (isMiddleMultiSelectColumn(column)) return [...column.selectOptions];
-  if (column.enumValues?.length) return [...(column.selectOptions?.length ? column.selectOptions : column.enumValues)];
-  return getUniqueMiddleValues(column.key);
-});
+	  if (!column) return [];
+	  if (isMiddleMultiSelectColumn(column)) return [...column.selectOptions];
+	  if (isMiddleSingleSelectColumn(column)) return getMiddleSingleSelectOptions(column);
+	  return getUniqueMiddleValues(column.key);
+	});
 const middleMultiFilterButtonText = computed(() => {
   if (!middleFilterField.value) return '请先选择筛选字段';
   if (!middleFilterValues.value.length) return '全部';
@@ -2129,9 +2180,9 @@ function validateMiddleChanges() {
 
     const raw = String(value ?? '').trim();
     if (!raw) return;
-    if (column.enumValues?.length && !column.enumValues.includes(raw)) {
-      errors.push(`${prefix}${column.label} 只能选择：${column.enumValues.join('、')}`);
-    }
+	    if (isMiddleSingleSelectColumn(column) && !getMiddleSingleSelectOptions(column).includes(raw)) {
+	      errors.push(`${prefix}${column.label} 只能选择：${getMiddleSingleSelectOptions(column).join('、')}`);
+	    }
     if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint'].includes(column.dataType) && !/^-?\d+$/.test(raw)) {
       errors.push(`${prefix}${column.label} 只能填写整数`);
     }
@@ -2290,7 +2341,7 @@ function getUniqueMiddleValues(key) {
 }
 
 function isMiddleSingleFilterColumn(column) {
-  return Boolean(column?.enumValues?.length);
+  return isMiddleSingleSelectColumn(column);
 }
 
 function isMiddleMultiFilterColumn(column) {
@@ -2303,6 +2354,17 @@ function isMiddleMultiSelectColumn(column) {
   const dataType = String(column.dataType || '').toLowerCase();
   const columnType = String(column.columnType || '').toLowerCase();
   return dataType === 'json' || columnType === 'json';
+}
+
+function isMiddleSingleSelectColumn(column) {
+  if (!column || isMiddleMultiSelectColumn(column)) return false;
+  return Boolean(column.enumValues?.length || column.selectOptions?.length);
+}
+
+function getMiddleSingleSelectOptions(column) {
+  if (column?.selectOptions?.length) return column.selectOptions;
+  if (column?.enumValues?.length) return column.enumValues;
+  return [];
 }
 
 function isMiddleFormulaColumn(column) {
@@ -2970,7 +3032,7 @@ function isHiddenTableConfigColumn(key) {
 }
 
 function isTableConfigSingleColumn(column) {
-  return Boolean(column?.enumValues?.length);
+  return isMiddleSingleSelectColumn(column);
 }
 
 function isTableConfigMultiColumn(column) {
@@ -2978,7 +3040,11 @@ function isTableConfigMultiColumn(column) {
 }
 
 function isTableConfigSelectableColumn(column) {
-  return isTableConfigSingleColumn(column) || isTableConfigMultiColumn(column);
+  return isTableConfigOptionCandidate(column) || isTableConfigSingleColumn(column) || isTableConfigMultiColumn(column);
+}
+
+function isTableConfigOptionCandidate(column) {
+  return !isHiddenTableConfigColumn(column?.key) && !isMiddleFileLikeColumn(column);
 }
 
 function isTableConfigFormulaColumn(column) {
@@ -2991,7 +3057,7 @@ function isTableConfigFormulaCandidate(column) {
 
 function getTableConfigColumnOptions(column) {
   if (isTableConfigMultiColumn(column)) return column.selectOptions || [];
-  if (isTableConfigSingleColumn(column)) return column.enumValues || [];
+  if (isTableConfigSingleColumn(column)) return getMiddleSingleSelectOptions(column);
   return [];
 }
 
@@ -3005,6 +3071,12 @@ function openFieldOptionConfig(table, column) {
   fieldOptionConfig.typeLabel = isTableConfigMultiColumn(column) ? '多选字段' : '单选字段';
   fieldOptionConfig.optionText = options.join('\n');
   fieldOptionConfig.originalOptionText = fieldOptionConfig.optionText;
+  fieldOptionConfig.mode = column.optionConfig?.type === 'table' ? 'table' : 'static';
+  fieldOptionConfig.originalMode = fieldOptionConfig.mode;
+  fieldOptionConfig.sourceTableName = column.optionConfig?.sourceTableName || '';
+  fieldOptionConfig.originalSourceTableName = fieldOptionConfig.sourceTableName;
+  fieldOptionConfig.sourceColumnName = column.optionConfig?.sourceColumnName || '';
+  fieldOptionConfig.originalSourceColumnName = fieldOptionConfig.sourceColumnName;
 }
 
 function closeFieldOptionConfig() {
@@ -3013,6 +3085,9 @@ function closeFieldOptionConfig() {
 
 function resetFieldOptionConfig() {
   fieldOptionConfig.optionText = fieldOptionConfig.originalOptionText;
+  fieldOptionConfig.mode = fieldOptionConfig.originalMode;
+  fieldOptionConfig.sourceTableName = fieldOptionConfig.originalSourceTableName;
+  fieldOptionConfig.sourceColumnName = fieldOptionConfig.originalSourceColumnName;
 }
 
 function parseFieldOptionText(value) {
@@ -3038,14 +3113,28 @@ function applyFieldOptionConfig() {
     return;
   }
 
-  const options = parseFieldOptionText(fieldOptionConfig.optionText);
-  if (isTableConfigSingleColumn(column)) {
-    column.enumValues = options;
-    column.selectOptions = options;
-  } else if (isTableConfigMultiColumn(column)) {
-    column.selectOptions = options;
+  if (fieldOptionConfig.mode === 'table') {
+    if (!fieldOptionConfig.sourceTableName || !fieldOptionConfig.sourceColumnName) {
+      tableConfigErrorText.value = '请选择来源表和来源字段';
+      return;
+    }
+    column.optionConfig = {
+      type: 'table',
+      sourceTableName: fieldOptionConfig.sourceTableName,
+      sourceColumnName: fieldOptionConfig.sourceColumnName
+    };
+  } else {
+    const options = parseFieldOptionText(fieldOptionConfig.optionText);
+    column.optionConfig = { type: 'static', sourceTableName: '', sourceColumnName: '' };
+    if (isTableConfigSingleColumn(column) || isTableConfigOptionCandidate(column)) {
+      column.enumValues = options;
+      column.selectOptions = options;
+    } else if (isTableConfigMultiColumn(column)) {
+      column.selectOptions = options;
+    }
   }
   tableConfigStatusText.value = '字段配置已更新，点击保存配置后生效';
+  tableConfigErrorText.value = '';
   closeFieldOptionConfig();
 }
 

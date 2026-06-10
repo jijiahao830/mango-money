@@ -431,6 +431,36 @@ JSON_CONTAINS(current_location, JSON_QUOTE('门店'))
    - 企业微信未隐藏表中的多选字段已改为 `JSON`。
 
 
+### 字段关联选项规范
+
+当一个表的字段需要从另一个表中选择值时，必须使用通用“字段选项来源”配置，不允许为某个字段写死特殊逻辑。
+
+1. 配置入口：
+   - 在表格管理中选择目标表。
+   - 找到目标字段，点击字段配置。
+   - 选择“从数据表读取”。
+   - 选择来源表和来源字段。
+
+2. 配置保存位置：
+   - 表名和字段名保存在 `cw_field_option_config.table_name`、`cw_field_option_config.column_name`。
+   - 固定选项保存在 `cw_field_option_config.options_json`。
+   - 数据表来源保存在 `cw_field_option_config.option_source_type`、`source_table_name`、`source_column_name`。
+
+3. 通用要求：
+   - 任意业务表字段都可以配置从任意业务表字段读取选项。
+   - 系统字段如 `id`、`create_time`、`update_time`、`status` 不作为普通业务选项字段配置。
+   - 图片、文件、附件类字段不应配置为下拉选项。
+   - 来源字段读取时应去重、过滤空值。
+
+4. 前端展示：
+   - 配置了来源表字段的字段，在中台中显示为下拉选择。
+   - 页面保存时，保存用户选择后的字段值到当前业务表。
+
+5. 示例：
+   - 报销费用明细表 `cw_bxfymxb.bxr` 从人员表 `cw_ryb.display_name` 读取报销人选项。
+   - 后续其他字段如负责人、销售、车队长、客户名称、车牌号等，也使用同一套配置方式。
+
+
 ### 图片及文件存放方式
 
 1. 图片和文件都存放在服务器本地目录 `create_file/` 下。

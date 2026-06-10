@@ -1246,6 +1246,26 @@ hr {
   margin: 8px 0 16px;
 }
 
+.field-option-mode {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 10px 0 14px;
+}
+
+.field-option-mode label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  margin: 0;
+  color: #334155;
+}
+
+.field-option-mode input {
+  width: auto;
+}
+
 .field-option-editor textarea {
   min-height: 240px;
   resize: vertical;

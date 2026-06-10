@@ -878,13 +878,38 @@ async function saveTableManagementConfig(payload) {
         const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
         if (!schemaColumn) continue;
 
-        if (isConfigurableSelectColumn(schemaColumn)) {
+        if (isConfigurableSelectColumn(schemaColumn) || isConfigurableOptionColumn(schemaColumn) || column.optionConfig) {
           const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
             ? column.selectOptions
             : column.enumValues;
           const options = uniqueStrings(Array.isArray(rawOptions) ? rawOptions : []);
+          const optionConfig = normalizeSubmittedOptionConfig(column.optionConfig);
 
-          if (!options.length) {
+          if (optionConfig.type === 'table') {
+            if (!schemaMap.has(optionConfig.sourceTableName)) {
+              throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的选项来源表不存在`);
+            }
+            const sourceTable = schemaMap.get(optionConfig.sourceTableName);
+            if (!sourceTable.columns.some(sourceColumn => sourceColumn.key === optionConfig.sourceColumnName)) {
+              throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的选项来源字段不存在`);
+            }
+            await conn.execute(
+              `INSERT INTO cw_field_option_config (
+                table_name,
+                column_name,
+                options_json,
+                option_source_type,
+                source_table_name,
+                source_column_name
+              ) VALUES (?, ?, NULL, 'table', ?, ?)
+              ON DUPLICATE KEY UPDATE
+                options_json = VALUES(options_json),
+                option_source_type = VALUES(option_source_type),
+                source_table_name = VALUES(source_table_name),
+                source_column_name = VALUES(source_column_name)`,
+              [schemaTable.tableName, schemaColumn.key, optionConfig.sourceTableName, optionConfig.sourceColumnName]
+            );
+          } else if (!options.length) {
             await conn.execute(
               `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
               [schemaTable.tableName, schemaColumn.key]
@@ -894,10 +919,16 @@ async function saveTableManagementConfig(payload) {
               `INSERT INTO cw_field_option_config (
                 table_name,
                 column_name,
-                options_json
-              ) VALUES (?, ?, ?)
+                options_json,
+                option_source_type,
+                source_table_name,
+                source_column_name
+              ) VALUES (?, ?, ?, 'static', '', '')
               ON DUPLICATE KEY UPDATE
-                options_json = VALUES(options_json)`,
+                options_json = VALUES(options_json),
+                option_source_type = VALUES(option_source_type),
+                source_table_name = VALUES(source_table_name),
+                source_column_name = VALUES(source_column_name)`,
               [schemaTable.tableName, schemaColumn.key, JSON.stringify(options)]
             );
           }
@@ -1286,6 +1317,17 @@ async function ensureFieldOptionConfigTable(conn) {
     options_json JSON NULL COMMENT '字段选项配置',
     UNIQUE KEY uk_table_column (table_name, column_name)
   ) DEFAULT CHARSET=utf8mb4 COMMENT='字段选项配置'`);
+  const [columns] = await conn.execute(`SHOW COLUMNS FROM cw_field_option_config`);
+  const names = new Set(columns.map(column => column.Field));
+  if (!names.has('option_source_type')) {
+    await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN option_source_type ENUM('static','table') NOT NULL DEFAULT 'static' COMMENT '选项来源类型' AFTER options_json`);
+  }
+  if (!names.has('source_table_name')) {
+    await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN source_table_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '来源表名' AFTER option_source_type`);
+  }
+  if (!names.has('source_column_name')) {
+    await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN source_column_name VARCHAR(100) NOT NULL DEFAULT '' COMMENT '来源字段名' AFTER source_table_name`);
+  }
 }
 
 async function ensureFormulaFieldConfigTable(conn) {
@@ -1368,13 +1410,14 @@ async function getSchemaTables(conn) {
   `, CONFIG_TABLES);
 
   const wecomSelectOptions = await getWecomSelectOptionsByDbField();
-  const configuredSelectOptions = await getConfiguredSelectOptionsByDbField(conn);
+  const configuredFieldOptions = await getConfiguredFieldOptionsByDbField(conn);
   const tableCommentByName = new Map(tableRows.map(table => [table.tableName, table.tableComment || '']));
   const columnsByTable = new Map();
   for (const column of columnRows) {
     if (!columnsByTable.has(column.tableName)) columnsByTable.set(column.tableName, []);
     const parsedEnumValues = parseEnumValues(column.columnType);
-    const configuredOptions = configuredSelectOptions.get(`${column.tableName}::${column.columnName}`) || [];
+    const configuredFieldOption = configuredFieldOptions.get(`${column.tableName}::${column.columnName}`) || {};
+    const configuredOptions = configuredFieldOption.options || [];
     const enumValues = parsedEnumValues.length && configuredOptions.length ? configuredOptions : parsedEnumValues;
     const selectOptions = getSelectOptionsForColumn(
       wecomSelectOptions,
@@ -1389,6 +1432,7 @@ async function getSchemaTables(conn) {
       columnType: column.columnType,
       enumValues,
       selectOptions: finalSelectOptions.length ? finalSelectOptions : enumValues,
+      optionConfig: configuredFieldOption.optionConfig || { type: 'static', sourceTableName: '', sourceColumnName: '' },
       isNullable: column.isNullable === 'YES',
       columnKey: column.columnKey || '',
       extra: column.extra || '',
@@ -1438,19 +1482,52 @@ async function getWecomSelectOptionsByDbField() {
   return optionsByField;
 }
 
-async function getConfiguredSelectOptionsByDbField(conn) {
+async function getConfiguredFieldOptionsByDbField(conn) {
   await ensureFieldOptionConfigTable(conn);
   const [rows] = await conn.execute(`
-    SELECT table_name, column_name, options_json
+    SELECT
+      table_name,
+      column_name,
+      options_json,
+      option_source_type,
+      source_table_name,
+      source_column_name
     FROM cw_field_option_config
   `);
-  const optionsByField = new Map();
+  const configByField = new Map();
   for (const row of rows) {
-    const options = uniqueStrings(parseJsonArray(row.options_json));
-    if (!options.length) continue;
-    optionsByField.set(`${row.table_name}::${row.column_name}`, options);
+    const optionConfig = {
+      type: row.option_source_type === 'table' ? 'table' : 'static',
+      sourceTableName: row.source_table_name || '',
+      sourceColumnName: row.source_column_name || ''
+    };
+    const options = optionConfig.type === 'table'
+      ? await getTableColumnOptions(conn, optionConfig.sourceTableName, optionConfig.sourceColumnName)
+      : uniqueStrings(parseJsonArray(row.options_json));
+    configByField.set(`${row.table_name}::${row.column_name}`, {
+      options,
+      optionConfig
+    });
   }
-  return optionsByField;
+  return configByField;
+}
+
+async function getTableColumnOptions(conn, tableName, columnName) {
+  if (!isSafeDbIdentifier(tableName) || !isSafeDbIdentifier(columnName)) return [];
+  const [rows] = await conn.query(`
+    SELECT DISTINCT ${escapeIdentifier(columnName)} AS value
+    FROM ${escapeIdentifier(tableName)}
+    WHERE ${escapeIdentifier(columnName)} IS NOT NULL
+      AND CAST(${escapeIdentifier(columnName)} AS CHAR) <> ''
+      ${tableName === USER_TABLE ? 'AND status = 1' : ''}
+    ORDER BY ${escapeIdentifier(columnName)} ASC
+    LIMIT 1000
+  `);
+  return uniqueStrings(rows.map(row => row.value));
+}
+
+function isSafeDbIdentifier(value) {
+  return /^[a-zA-Z0-9_]+$/.test(String(value || ''));
 }
 
 async function getFormulaConfigsByTable(conn, schemaTables) {
@@ -1766,6 +1843,21 @@ function isConfigurableSelectColumn(column) {
   return column?.dataType === 'json' && Array.isArray(column.selectOptions) && column.selectOptions.length > 0;
 }
 
+function isConfigurableOptionColumn(column) {
+  return ['varchar', 'char', 'text', 'mediumtext', 'longtext'].includes(String(column?.dataType || '').toLowerCase());
+}
+
+function normalizeSubmittedOptionConfig(config) {
+  if (config?.type === 'table') {
+    return {
+      type: 'table',
+      sourceTableName: String(config.sourceTableName || '').trim(),
+      sourceColumnName: String(config.sourceColumnName || '').trim()
+    };
+  }
+  return { type: 'static', sourceTableName: '', sourceColumnName: '' };
+}
+
 function parseEnumValues(columnType) {
   const raw = String(columnType || '');
   if (!raw.startsWith('enum(')) return [];
@@ -1823,6 +1915,10 @@ function normalizeMiddleCellValue(column, rawValue) {
     return { value: JSON.stringify(values) };
   }
 
+  if (isSingleSelectColumn(column) && !column.selectOptions.includes(value)) {
+    return { error: `只能选择：${column.selectOptions.join('、')}` };
+  }
+
   if (['int', 'bigint', 'smallint', 'mediumint', 'tinyint'].includes(column.dataType)) {
     if (!/^-?\d+$/.test(value)) return { error: '只能填写整数' };
     return { value: Number(value) };
@@ -1850,6 +1946,11 @@ function normalizeMiddleCellValue(column, rawValue) {
 
 function isJsonSelectColumn(column) {
   return column?.dataType === 'json' && Array.isArray(column.selectOptions) && column.selectOptions.length > 0;
+}
+
+function isSingleSelectColumn(column) {
+  if (!Array.isArray(column?.selectOptions) || !column.selectOptions.length) return false;
+  return column.dataType !== 'json' && !column.enumValues?.length;
 }
 
 function parseSubmittedMultiSelectValue(value) {

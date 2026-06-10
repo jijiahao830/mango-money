@@ -44,6 +44,7 @@
 - 表格管理
   - 管理员可进入 `/table-management` 配置哪些数据库表在中台显示。
   - 可配置每张表显示哪些字段。
+  - 可配置字段选项来源，支持固定选项，也支持从其他数据表读取选项。
   - 可为字段配置公式，公式支持选择本表字段和其他表字段聚合值。
   - 表存在公式字段时，后端会创建对应的中台展示视图；中台优先显示数据库已有值，没有值时显示公式计算结果。
   - 默认显示 `cardata_money` 库中的业务表，后续由管理员按需隐藏。
@@ -324,6 +325,17 @@ sudo apt install -y chromium-browser webp
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
 
+### 字段选项来源
+
+表格管理的字段配置支持两种选项来源：
+
+- 固定选项：直接保存在 `cw_field_option_config.options_json`。
+- 数据表读取：保存在 `cw_field_option_config.option_source_type/source_table_name/source_column_name`，中台加载时从来源表读取去重后的字段值作为下拉选项。
+
+当前已配置：
+
+- 报销费用明细表（`cw_bxfymxb`）的报销人字段（`bxr`）从人员表（`cw_ryb`）的姓名/显示名字段（`display_name`）读取。
+
 ## 更新记录
 
 2026-06-10
@@ -332,10 +344,12 @@ sudo apt install -y chromium-browser webp
 - 表格管理支持字段公式配置。
 - 中台支持有公式字段的表通过展示视图读取数据。
 - 中台保存时会把公式展示值写回原业务表字段。
+- 表格管理支持字段选项从其他数据表读取。
 
 数据库：
 - 新增公式字段配置表 `cw_formula_field_config`。
 - 有公式字段的业务表会自动创建 `cw_formula_view_原表名` 展示视图。
+- `cw_field_option_config` 增加选项来源配置字段。
 
 ### 图片生成专用表
 
@@ -1189,6 +1203,5 @@ sudo apt install -y chromium-browser webp
 | `clhbzq` | 车辆回报周期 | `decimal(14,2)` | YES |  |
 
 <!-- POS_DB_SCHEMA_END -->
-
 
 
