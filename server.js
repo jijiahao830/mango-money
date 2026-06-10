@@ -782,6 +782,8 @@ async function saveMiddlePlatformTableData(payload) {
       }
     }
 
+    const deleteBaseRows = await getMiddleDeleteBaseRows(conn, schemaTable, primaryKeyColumn, deletes);
+
     for (let rowIndex = 0; rowIndex < deletes.length; rowIndex += 1) {
       const primaryValue = deletes[rowIndex]?.primaryKey?.value;
       if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') {
@@ -803,7 +805,7 @@ async function saveMiddlePlatformTableData(payload) {
           primaryKeyColumn,
           operationType: 'delete',
           primaryValue,
-          changes: {}
+          changes: { before: deleteBaseRows.get(String(primaryValue)) || {} }
         }));
       }
     }
@@ -1986,6 +1988,25 @@ async function getMiddleUpdateBaseRows(conn, schemaTable, primaryKeyColumn, upda
   const ids = uniqueStrings(
     updates
       .map(update => update?.primaryKey?.value)
+      .filter(value => value !== undefined && value !== null && String(value) !== '')
+      .map(String)
+  );
+  if (!ids.length) return new Map();
+
+  const [rows] = await conn.query(
+    `SELECT *
+     FROM ${escapeIdentifier(schemaTable.tableName)}
+     WHERE ${escapeIdentifier(primaryKeyColumn.key)} IN (${ids.map(() => '?').join(', ')})`,
+    ids
+  );
+  return new Map(rows.map(row => [String(row[primaryKeyColumn.key]), row]));
+}
+
+async function getMiddleDeleteBaseRows(conn, schemaTable, primaryKeyColumn, deletes) {
+  if (!deletes.length) return new Map();
+  const ids = uniqueStrings(
+    deletes
+      .map(item => item?.primaryKey?.value)
       .filter(value => value !== undefined && value !== null && String(value) !== '')
       .map(String)
   );

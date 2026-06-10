@@ -369,6 +369,7 @@ sudo apt install -y chromium-browser webp
 - `delete`：删除。
 
 `middle_operation_log.table_name` 记录被操作的真实数据库业务表名，例如 `cw_bxfymxb`；日志表自身不使用 `cw_` 前缀。
+删除操作的 `change_json` 保存删除前的整行快照，格式为 `{ "before": {...} }`。
 
 ## 更新记录
 
