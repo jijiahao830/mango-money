@@ -1040,24 +1040,26 @@
                   type="checkbox"
                   @change="toggleTableField(selectedTableConfig, column.key)"
                 />
-                <span class="field-check-title">
-                  <span>{{ column.label }}</span>
-	                  <button
-	                    v-if="isTableConfigSelectableColumn(column)"
-	                    class="secondary field-config-button"
-	                    type="button"
-	                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
-	                  >
-	                    配置
-	                  </button>
-	                  <button
-	                    v-if="isTableConfigFormulaCandidate(column)"
-	                    class="secondary field-config-button"
-	                    type="button"
-	                    @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
-	                  >
-	                    公式
-	                  </button>
+	                <span class="field-check-title">
+	                  <span>{{ column.label }}</span>
+	                  <span class="field-check-actions">
+	                    <button
+	                      v-if="isTableConfigFormulaCandidate(column)"
+	                      class="secondary field-config-button"
+	                      type="button"
+	                      @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
+	                    >
+	                      公式
+	                    </button>
+	                    <button
+	                      v-if="isTableConfigSelectableColumn(column)"
+	                      class="secondary field-config-button"
+	                      type="button"
+	                      @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
+	                    >
+	                      配置
+	                    </button>
+	                  </span>
 	                </span>
 	                <small>
 	                  {{ column.key }}
