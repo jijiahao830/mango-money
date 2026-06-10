@@ -1345,6 +1345,7 @@ const selectedMiddleRows = computed(() => {
 const middleFilterColumns = computed(() =>
   (selectedMiddleTable.value?.columns || [])
     .filter(column => !['id', 'create_time', 'update_time'].includes(column.key))
+    .filter(column => !isMiddleFileLikeColumn(column))
     .filter(column => isMiddleSingleFilterColumn(column) || isMiddleMultiFilterColumn(column))
 );
 const middleFilterColumn = computed(() =>
@@ -1868,6 +1869,29 @@ function isMiddleMultiFilterColumn(column) {
   const dataType = String(column.dataType || '').toLowerCase();
   const columnType = String(column.columnType || '').toLowerCase();
   return dataType === 'json' || columnType === 'json';
+}
+
+function isMiddleFileLikeColumn(column) {
+  const text = `${column?.key || ''} ${column?.label || ''}`.toLowerCase();
+  return [
+    'file',
+    'image',
+    'img',
+    'photo',
+    'photos',
+    'attachment',
+    'attachments',
+    'picture',
+    'pictures',
+    '文件',
+    '图片',
+    '照片',
+    '附件',
+    '影像',
+    '凭证',
+    '票据',
+    '保单'
+  ].some(token => text.includes(token));
 }
 
 function parseMiddleFilterValues(value) {
