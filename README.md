@@ -450,7 +450,7 @@ sudo apt install -y chromium-browser webp
 | `bz` | 备注 | `text` | YES |  |
 | `khsq` | 客户收取 | `decimal(12,2)` | NO | 0.00 |
 | `gscd` | 公司承担 | `decimal(12,2)` | NO | 0.00 |
-| `bxd` | 报销单 | `text` | YES |  |
+| `bxd` | 报销单 | `json` | YES |  |
 | `gl` | 关联 | `varchar(100)` | NO |  |
 
 ### 保险续费记录表（`cw_bxxfjlb`）
@@ -1204,4 +1204,3 @@ sudo apt install -y chromium-browser webp
 | `clhbzq` | 车辆回报周期 | `decimal(14,2)` | YES |  |
 
 <!-- POS_DB_SCHEMA_END -->
-
