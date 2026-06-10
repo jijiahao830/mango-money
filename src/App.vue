@@ -1189,10 +1189,10 @@
 	      <p v-if="middleFileModal.errorText" class="error-text">{{ middleFileModal.errorText }}</p>
 
 	      <div class="modal-footer middle-file-footer">
-	        <button type="button" @click="triggerMiddleFileUpload">上传</button>
+	        <button type="button" :disabled="!middleFileModal.isEditable" @click="triggerMiddleFileUpload">上传</button>
 	        <button class="secondary" type="button" :disabled="!middleFileModal.files.length" @click="downloadSelectedMiddleFile">下载</button>
-	        <button class="secondary" type="button" :disabled="middleFileModal.selectedIndex < 0" @click="deleteSelectedMiddleFile">删除</button>
-	        <button type="button" @click="saveMiddleFileCellModal">保存</button>
+	        <button class="secondary" type="button" :disabled="!middleFileModal.isEditable || middleFileModal.selectedIndex < 0" @click="deleteSelectedMiddleFile">删除</button>
+	        <button type="button" :disabled="!middleFileModal.isEditable" @click="saveMiddleFileCellModal">保存</button>
 	      </div>
 	    </section>
 	  </div>
@@ -1595,6 +1595,7 @@ const middleFileModal = reactive({
   kindLabel: '文件字段',
   accept: '',
   row: null,
+  isEditable: false,
   files: [],
   selectedIndex: -1,
   errorText: ''
@@ -2164,6 +2165,153 @@ function saveMiddleCellMultiSelect() {
 
 function closeMiddleCellMultiSelect() {
   clearMiddleCellMultiSelect();
+}
+
+function getMiddleFileKind(column) {
+  return column?.fieldKind === 'image' ? 'image' : 'file';
+}
+
+function getMiddleFileCellText(row, column) {
+  const files = parseMiddleFileItems(row?.[column.key]);
+  if (!files.length) return getMiddleFileKind(column) === 'image' ? '点击上传图片' : '点击上传文件';
+  const unit = getMiddleFileKind(column) === 'image' ? '张图片' : '个文件';
+  return `${files.length} ${unit}`;
+}
+
+function openMiddleFileCellModal(row, rowIndex, column) {
+  selectMiddleRow(row, rowIndex);
+  const kind = getMiddleFileKind(column);
+  middleFileModal.isOpen = true;
+  middleFileModal.tableLabel = selectedMiddleTable.value?.label || selectedMiddleTable.value?.databaseName || '';
+  middleFileModal.columnKey = column.key;
+  middleFileModal.columnLabel = column.label || column.key;
+  middleFileModal.kind = kind;
+  middleFileModal.kindLabel = kind === 'image' ? '图片字段' : '文件字段';
+  middleFileModal.accept = kind === 'image' ? 'image/*' : '';
+  middleFileModal.row = row;
+  middleFileModal.isEditable = Boolean(column.isEditable);
+  middleFileModal.files = parseMiddleFileItems(row?.[column.key]);
+  middleFileModal.selectedIndex = middleFileModal.files.length ? 0 : -1;
+  middleFileModal.errorText = '';
+}
+
+function closeMiddleFileCellModal() {
+  middleFileModal.isOpen = false;
+  middleFileModal.row = null;
+  middleFileModal.files = [];
+  middleFileModal.selectedIndex = -1;
+  middleFileModal.errorText = '';
+  if (middleFileInputRef.value) middleFileInputRef.value.value = '';
+}
+
+function triggerMiddleFileUpload() {
+  if (!middleFileModal.isEditable) return;
+  middleFileInputRef.value?.click();
+}
+
+async function handleMiddleFileUpload(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  middleFileModal.errorText = '';
+  try {
+    const uploaded = await Promise.all(files.map(readMiddleFileAsItem));
+    middleFileModal.files = [...middleFileModal.files, ...uploaded];
+    middleFileModal.selectedIndex = middleFileModal.files.length - 1;
+  } catch (error) {
+    middleFileModal.errorText = error?.message || '文件读取失败';
+  } finally {
+    event.target.value = '';
+  }
+}
+
+function readMiddleFileAsItem(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      size: file.size,
+      dataUrl: String(reader.result || ''),
+      uploadedAt: new Date().toISOString()
+    });
+    reader.onerror = () => reject(new Error(`${file.name} 读取失败`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function downloadSelectedMiddleFile() {
+  const file = middleFileModal.files[middleFileModal.selectedIndex] || middleFileModal.files[0];
+  if (!file) return;
+  const href = file.dataUrl || file.url || file.value || '';
+  if (!href) {
+    middleFileModal.errorText = '当前文件没有可下载地址';
+    return;
+  }
+  const anchor = document.createElement('a');
+  anchor.href = href;
+  anchor.download = file.name || 'download';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function deleteSelectedMiddleFile() {
+  const index = middleFileModal.selectedIndex;
+  if (!middleFileModal.isEditable || index < 0) return;
+  middleFileModal.files = middleFileModal.files.filter((_, itemIndex) => itemIndex !== index);
+  middleFileModal.selectedIndex = middleFileModal.files.length ? Math.min(index, middleFileModal.files.length - 1) : -1;
+}
+
+function saveMiddleFileCellModal() {
+  const row = middleFileModal.row;
+  const field = middleFileModal.columnKey;
+  if (!row || !field || !middleFileModal.isEditable) return;
+  row[field] = middleFileModal.files.map(file => ({ ...file }));
+  markMiddleCellDirty(row, field);
+  closeMiddleFileCellModal();
+}
+
+function parseMiddleFileItems(value) {
+  if (value === undefined || value === null || value === '') return [];
+  if (Array.isArray(value)) return value.map(normalizeMiddleFileItem).filter(Boolean);
+  if (typeof value === 'object') return [normalizeMiddleFileItem(value)].filter(Boolean);
+
+  const raw = String(value).trim();
+  if (!raw) return [];
+  if ((raw.startsWith('[') && raw.endsWith(']')) || (raw.startsWith('{') && raw.endsWith('}'))) {
+    try {
+      return parseMiddleFileItems(JSON.parse(raw));
+    } catch {}
+  }
+  return [{ name: raw.split('/').pop() || raw, url: raw, size: 0, type: '' }];
+}
+
+function normalizeMiddleFileItem(item) {
+  if (!item) return null;
+  if (typeof item === 'string') {
+    return { name: item.split('/').pop() || item, url: item, size: 0, type: '' };
+  }
+  const url = item.dataUrl || item.url || item.value || '';
+  return {
+    name: item.name || item.title || item.label || (url ? String(url).split('/').pop() : '未命名文件'),
+    type: item.type || '',
+    size: Number(item.size || 0),
+    dataUrl: item.dataUrl || '',
+    url: item.url || '',
+    uploadedAt: item.uploadedAt || ''
+  };
+}
+
+function isMiddleImageFile(file) {
+  return String(file?.type || '').startsWith('image/') || String(file?.dataUrl || file?.url || '').startsWith('data:image/');
+}
+
+function formatMiddleFileSize(size) {
+  const bytes = Number(size || 0);
+  if (!bytes) return '未知大小';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 async function slideMiddleTableToShowCellPopover(trigger) {

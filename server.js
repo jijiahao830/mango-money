@@ -1961,6 +1961,23 @@ function getPrimaryKeyColumn(schemaTable) {
 }
 
 function normalizeMiddleCellValue(column, rawValue) {
+  if (column.dataType === 'json' && !isJsonSelectColumn(column)) {
+    if (rawValue === undefined || rawValue === null || rawValue === '') {
+      return column.isNullable ? { value: null } : { value: JSON.stringify([]) };
+    }
+    if (typeof rawValue === 'string') {
+      const value = rawValue.trim();
+      if (!value) return column.isNullable ? { value: null } : { value: JSON.stringify([]) };
+      try {
+        JSON.parse(value);
+        return { value };
+      } catch {
+        return { value: JSON.stringify([value]) };
+      }
+    }
+    return { value: JSON.stringify(rawValue) };
+  }
+
   const value = rawValue === undefined || rawValue === null ? '' : String(rawValue).trim();
   if (value === '') {
     return column.isNullable ? { value: null } : { value: '' };
