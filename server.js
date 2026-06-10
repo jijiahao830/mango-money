@@ -606,7 +606,6 @@ async function listMiddlePlatformTables() {
         SELECT ${selectSql}
         FROM ${escapeIdentifier(viewName || schemaTable.tableName)}
         ${orderSql}
-        LIMIT 500
       `);
       const hydratedRows = await attachFormulaRawValues(conn, schemaTable, primaryKeyColumn, formulaConfigs, rows);
 
