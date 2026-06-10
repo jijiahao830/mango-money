@@ -194,7 +194,7 @@ h1 {
 .middle-platform-page {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  align-items: stretch;
+  align-items: start;
   gap: 14px;
 }
 
@@ -208,7 +208,7 @@ h1 {
 }
 
 .middle-sidebar {
-  align-self: stretch;
+  align-self: start;
   display: flex;
   flex-direction: column;
   gap: 4px;

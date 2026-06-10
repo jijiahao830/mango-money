@@ -164,7 +164,7 @@
       </section>
 
       <section v-else-if="activePage === 'middle'" class="middle-platform-page">
-        <aside class="middle-sidebar" aria-label="中台表列表">
+        <aside class="middle-sidebar" :style="middleSidebarStyle" aria-label="中台表列表">
           <label class="table-sidebar-search">
             <span>搜索表格</span>
             <input v-model="middleTableSearchText" placeholder="输入表名或显示名" />
@@ -183,7 +183,7 @@
           </div>
         </aside>
 
-        <section class="middle-content">
+        <section ref="middleContentRef" class="middle-content">
           <header class="middle-toolbar">
             <div>
               <h1>{{ selectedMiddleTable?.label || '中台' }}</h1>
@@ -1078,7 +1078,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { pageRoutes } from './router';
 import orangeLogo from './assets/logo.webp';
@@ -1226,6 +1226,8 @@ const isHealthLoading = ref(false);
 const healthErrorText = ref('');
 const middleTables = ref([]);
 const activeMiddleTable = ref('cw_cxcsb');
+const middleContentRef = ref(null);
+const middleSidebarHeight = ref('');
 const isMiddleLoading = ref(false);
 const isMiddleSaving = ref(false);
 const middleErrorText = ref('');
@@ -1263,6 +1265,7 @@ const scale = ref(1);
 const progress = ref(0);
 let progressTimer = null;
 let previewObjectUrl = '';
+let middleResizeObserver = null;
 const result = reactive({
   imageUrl: '',
   webpName: '',
@@ -1283,6 +1286,9 @@ const progressLogoStyle = computed(() => ({
 
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
+const middleSidebarStyle = computed(() => (
+  middleSidebarHeight.value ? { height: middleSidebarHeight.value } : {}
+));
 const selectedMiddleTable = computed(() =>
   filteredMiddleTables.value.find(table => table.key === activeMiddleTable.value) || filteredMiddleTables.value[0] || null
 );
@@ -1450,6 +1456,16 @@ watch(balanceReceivedAt, (value) => {
   balanceForm.receivedAt = value ? formatDate(value) : '';
 });
 
+onMounted(() => {
+  window.addEventListener('resize', syncMiddleSidebarHeight);
+  nextTick(observeMiddleContentHeight);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', syncMiddleSidebarHeight);
+  middleResizeObserver?.disconnect();
+});
+
 watch(activePage, (value) => {
   if (value === 'home' && isAdministrator.value) {
     loadHealthStatus();
@@ -1486,6 +1502,7 @@ watch(activePage, (value) => {
   if (value === 'history') {
     loadHistoryImages();
   }
+  nextTick(observeMiddleContentHeight);
 }, { immediate: true });
 
 watch(filteredTableConfigItems, (items) => {
@@ -1521,6 +1538,25 @@ function navigatePage(page) {
   if (route.path !== target) {
     router.push(target);
   }
+}
+
+function observeMiddleContentHeight() {
+  middleResizeObserver?.disconnect();
+  middleResizeObserver = null;
+
+  if (activePage.value !== 'middle' || !middleContentRef.value) {
+    middleSidebarHeight.value = '';
+    return;
+  }
+
+  middleResizeObserver = new ResizeObserver(syncMiddleSidebarHeight);
+  middleResizeObserver.observe(middleContentRef.value);
+  syncMiddleSidebarHeight();
+}
+
+function syncMiddleSidebarHeight() {
+  if (activePage.value !== 'middle' || !middleContentRef.value) return;
+  middleSidebarHeight.value = `${middleContentRef.value.offsetHeight}px`;
 }
 
 function selectMiddleTable(key) {
