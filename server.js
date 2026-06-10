@@ -877,7 +877,8 @@ async function saveTableManagementConfig(payload) {
       for (const column of submittedColumns) {
         const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
         if (!schemaColumn) continue;
-        const submittedFieldKind = normalizeFieldKind(column.fieldKind) || inferFieldKind(schemaColumn);
+        const inferredFieldKind = normalizeFieldKind(column.fieldKind) || inferFieldKind(schemaColumn);
+        const submittedFieldKind = shouldPersistFieldKind(inferredFieldKind) ? inferredFieldKind : '';
 
         if (isConfigurableSelectColumn(schemaColumn) || isConfigurableOptionColumn(schemaColumn) || column.optionConfig) {
           const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
@@ -1547,6 +1548,10 @@ function isSafeDbIdentifier(value) {
 function normalizeFieldKind(value) {
   const kind = String(value || '').trim();
   return ['single', 'multi', 'text', 'date', 'image', 'file', 'relation', 'calc'].includes(kind) ? kind : '';
+}
+
+function shouldPersistFieldKind(kind) {
+  return Boolean(kind) && !['text', 'date'].includes(kind);
 }
 
 function inferFieldKind(column) {

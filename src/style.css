@@ -1227,9 +1227,16 @@ hr {
 }
 
 .field-kind-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: auto;
+  min-width: 0;
   padding: 2px 6px;
   min-height: 22px;
   margin: 0;
+  margin-top: 0;
   border: 0;
   border-radius: 999px;
   color: #c2410c;

@@ -1045,6 +1045,7 @@
 		                  <small>
 		                    {{ column.key }}
 	                    <button
+	                      v-if="shouldShowFieldKindTag(column)"
 	                      class="field-kind-tag"
 	                      type="button"
 	                      @click.prevent.stop="openFieldKindMenu(selectedTableConfig, column, $event)"
@@ -1458,8 +1459,6 @@ const permissionOptions = [
 const fieldKindOptions = [
   { value: 'single', label: '单选' },
   { value: 'multi', label: '多选' },
-  { value: 'text', label: '文本' },
-  { value: 'date', label: '日期' },
   { value: 'image', label: '图片' },
   { value: 'file', label: '文件' },
   { value: 'relation', label: '关联' },
@@ -3105,6 +3104,10 @@ function isTableConfigFormulaColumn(column) {
 
 function isTableConfigFormulaCandidate(column) {
   return !isHiddenTableConfigColumn(column?.key);
+}
+
+function shouldShowFieldKindTag(column) {
+  return !['text', 'date'].includes(getFieldKind(column));
 }
 
 function getFieldKind(column) {
