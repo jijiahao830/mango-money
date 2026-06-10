@@ -529,6 +529,15 @@ JSON_CONTAINS(current_location, JSON_QUOTE('门店'))
    - 操作表名记录真实业务表名，例如 `cw_bxfymxb`；日志表自身不使用 `cw_` 前缀。
    - 删除操作的变更内容必须保存删除前的整行快照，格式为 `{ "before": {...} }`。
 
+### 中台表格排序规范
+
+中台表格默认按旧到新显示。
+
+1. 有 `create_time` 和 `id` 的表，按 `create_time ASC, id ASC` 排序。
+2. 只有 `create_time` 的表，按 `create_time ASC` 排序。
+3. 只有 `id` 的表，按 `id ASC` 排序。
+4. 新增数据保存后应出现在最后一行。
+
 3. 图片和文件字段都支持多个文件，数据库字段存 JSON 数组。
 
 4. JSON 格式如下：

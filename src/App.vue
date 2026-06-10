@@ -274,6 +274,7 @@
                   <tr
                     v-for="(row, rowIndex) in selectedMiddleRows"
                     :key="getMiddleRowRenderKey(row, rowIndex)"
+                    :data-row-key="getMiddleRowRenderKey(row, rowIndex)"
                     :class="{ selected: middleSelectedRowKey === getMiddleRowRenderKey(row, rowIndex), pendingDelete: row.__pendingDelete }"
                     @click="selectMiddleRow(row, rowIndex)"
                   >
@@ -2548,6 +2549,19 @@ async function scrollMiddleTableToBottom() {
   });
 }
 
+async function revealSavedMiddleRow(data) {
+  const insertedId = data?.insertedIds?.[data.insertedIds.length - 1];
+  if (insertedId === undefined || insertedId === null || insertedId === '') return;
+  clearMiddleFilters();
+  middleSelectedRowKey.value = String(insertedId);
+  await nextTick();
+  const wrap = middleTableWrapRef.value;
+  const selector = `[data-row-key="${CSS.escape(String(insertedId))}"]`;
+  const rowElement = wrap?.querySelector?.(selector);
+  if (!rowElement) return;
+  rowElement.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+}
+
 async function removeMiddleRow() {
   const table = selectedMiddleTable.value;
   if (!table || !selectedMiddleRows.value.length) return;
@@ -2775,6 +2789,7 @@ async function saveMiddleTableChanges() {
 	    const data = await response.json();
 	    if (!response.ok) throw new Error(data.error || '保存失败');
 	    await loadMiddlePlatform();
+	    await revealSavedMiddleRow(data);
 	    middleSaveStatusText.value = formatMiddleSaveStatus(data);
 	  } catch (error) {
 	    middleErrorText.value = error?.message || String(error);

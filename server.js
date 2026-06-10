@@ -2302,8 +2302,9 @@ function buildMiddleTableOrderSql(tableName, columns) {
   if (tableName === 'cw_ndlrb' && columnKeys.has('rq')) {
     return 'ORDER BY rq ASC, id ASC';
   }
-  if (columnKeys.has('create_time')) return 'ORDER BY create_time DESC';
-  if (columnKeys.has('id')) return 'ORDER BY id DESC';
+  if (columnKeys.has('create_time') && columnKeys.has('id')) return 'ORDER BY create_time ASC, id ASC';
+  if (columnKeys.has('create_time')) return 'ORDER BY create_time ASC';
+  if (columnKeys.has('id')) return 'ORDER BY id ASC';
   return '';
 }
 
