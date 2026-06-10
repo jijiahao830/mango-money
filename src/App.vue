@@ -277,12 +277,19 @@
                     :class="{ selected: middleSelectedRowKey === getMiddleRowRenderKey(row, rowIndex), pendingDelete: row.__pendingDelete }"
                     @click="selectMiddleRow(row, rowIndex)"
                   >
-                    <td class="row-index">{{ rowIndex + 1 }}</td>
-                    <td v-for="column in selectedMiddleTable.columns" :key="column.key">
-                      <div
-                        v-if="column.isEditable && isMiddleMultiSelectColumn(column)"
-                        class="middle-cell-multi-wrap"
-                      >
+	                    <td class="row-index">{{ rowIndex + 1 }}</td>
+	                    <td v-for="column in selectedMiddleTable.columns" :key="column.key">
+	                      <span
+	                        v-if="isMiddleFormulaColumn(column)"
+	                        class="middle-formula-value"
+	                        :class="{ calculated: isMiddleFormulaCalculated(row, column) }"
+	                      >
+	                        {{ formatMiddleValue(column.key, getMiddleDisplayCellValue(row, column)) }}
+	                      </span>
+	                      <div
+	                        v-else-if="column.isEditable && isMiddleMultiSelectColumn(column)"
+	                        class="middle-cell-multi-wrap"
+	                      >
                         <button
                           class="middle-cell-input middle-cell-multi-button"
                           :class="{ changed: isMiddleCellDirty(row, column.key) }"
@@ -1027,21 +1034,30 @@
                 />
                 <span class="field-check-title">
                   <span>{{ column.label }}</span>
-                  <button
-                    v-if="isTableConfigSelectableColumn(column)"
-                    class="secondary field-config-button"
-                    type="button"
-                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
-                  >
-                    配置
-                  </button>
-                </span>
-                <small>
-                  {{ column.key }}
-                  <em v-if="isTableConfigSingleColumn(column)">单选</em>
-                  <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
-                </small>
-              </label>
+	                  <button
+	                    v-if="isTableConfigSelectableColumn(column)"
+	                    class="secondary field-config-button"
+	                    type="button"
+	                    @click.prevent.stop="openFieldOptionConfig(selectedTableConfig, column)"
+	                  >
+	                    配置
+	                  </button>
+	                  <button
+	                    v-if="isTableConfigFormulaCandidate(column)"
+	                    class="secondary field-config-button"
+	                    type="button"
+	                    @click.prevent.stop="openFormulaConfig(selectedTableConfig, column)"
+	                  >
+	                    公式
+	                  </button>
+	                </span>
+	                <small>
+	                  {{ column.key }}
+	                  <em v-if="isTableConfigSingleColumn(column)">单选</em>
+	                  <em v-else-if="isTableConfigMultiColumn(column)">多选</em>
+	                  <em v-if="isTableConfigFormulaColumn(column)">公式</em>
+	                </small>
+	              </label>
             </div>
 
             <div class="form-actions">
@@ -1088,8 +1104,8 @@
     </section>
   </main>
 
-  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
-    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
+	  <div v-if="fieldOptionConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFieldOptionConfig">
+	    <section class="confirm-modal field-option-modal" role="dialog" aria-modal="true">
       <header class="modal-header">
         <div>
           <h2>{{ fieldOptionConfig.columnLabel }}</h2>
@@ -1107,10 +1123,105 @@
         <button type="button" @click="applyFieldOptionConfig">保存字段配置</button>
         <button class="secondary" type="button" @click="resetFieldOptionConfig">恢复当前值</button>
       </div>
-    </section>
-  </div>
+	    </section>
+	  </div>
 
-  <div v-if="isPreviewOpen" class="modal-backdrop" @click.self="closePreview">
+	  <div v-if="formulaConfig.isOpen" class="modal-backdrop confirm-backdrop" @click.self="closeFormulaConfig">
+	    <section class="confirm-modal field-option-modal formula-config-modal" role="dialog" aria-modal="true">
+	      <header class="modal-header">
+	        <div>
+	          <h2>{{ formulaConfig.columnLabel }}</h2>
+	          <p>{{ formulaConfig.tableLabel }} · 公式字段</p>
+	        </div>
+	        <button class="secondary tool-button" type="button" @click="closeFormulaConfig">关闭</button>
+	      </header>
+
+	      <div class="formula-builder-grid">
+	        <label>
+	          <span>本表字段</span>
+	          <select v-model="formulaConfig.currentFieldKey">
+	            <option value="">选择本表字段</option>
+	            <option
+	              v-for="column in formulaCurrentColumns"
+	              :key="column.key"
+	              :value="column.key"
+	            >
+	              {{ column.label }}（{{ column.key }}）
+	            </option>
+	          </select>
+	        </label>
+	        <button class="secondary tool-button formula-insert-button" type="button" @click="insertCurrentFormulaField">
+	          插入
+	        </button>
+	      </div>
+
+	      <div class="formula-builder-grid formula-builder-grid-wide">
+	        <label>
+	          <span>其他表</span>
+	          <select v-model="formulaConfig.foreignTableName">
+	            <option value="">选择表</option>
+	            <option
+	              v-for="table in formulaForeignTables"
+	              :key="table.tableName"
+	              :value="table.tableName"
+	            >
+	              {{ table.tableLabel || table.tableName }}
+	            </option>
+	          </select>
+	        </label>
+	        <label>
+	          <span>字段</span>
+	          <select v-model="formulaConfig.foreignColumnKey" :disabled="!formulaConfig.foreignTableName">
+	            <option value="">选择字段</option>
+	            <option
+	              v-for="column in formulaForeignColumns"
+	              :key="column.key"
+	              :value="column.key"
+	            >
+	              {{ column.label }}（{{ column.key }}）
+	            </option>
+	          </select>
+	        </label>
+	        <label>
+	          <span>取值方式</span>
+	          <select v-model="formulaConfig.aggregate">
+	            <option value="sum">合计</option>
+	            <option value="avg">平均</option>
+	            <option value="count">数量</option>
+	            <option value="max">最大</option>
+	            <option value="min">最小</option>
+	            <option value="first">最新一条</option>
+	          </select>
+	        </label>
+	        <button class="secondary tool-button formula-insert-button" type="button" @click="insertForeignFormulaField">
+	          插入
+	        </button>
+	      </div>
+
+	      <label class="field-option-editor">
+	        <span>公式表达式</span>
+	        <textarea
+	          v-model="formulaConfig.expression"
+	          rows="8"
+	          placeholder="{this.amount} - {this.cost} + {cw_srmxb.je.sum}"
+	        ></textarea>
+	      </label>
+
+	      <div class="formula-help">
+	        <span>支持数字、括号、加减乘除。</span>
+	        <span>本表字段格式：{this.字段名}</span>
+	        <span>其他表字段格式：{表名.字段名.取值方式}</span>
+	      </div>
+
+	      <div class="modal-footer">
+	        <button type="button" @click="applyFormulaConfig">保存公式配置</button>
+	        <button class="secondary" type="button" @click="resetFormulaConfig">恢复当前值</button>
+	        <button class="secondary" type="button" @click="clearFormulaConfig">清除公式</button>
+	      </div>
+	    </section>
+	  </div>
+
+	  <div v-if="isPreviewOpen" class="modal-backdrop" @click.self="closePreview">
     <section class="preview-modal" aria-modal="true" role="dialog">
       <header class="modal-header">
         <h2>{{ previewTitle }}</h2>
@@ -1355,6 +1466,19 @@ const fieldOptionConfig = reactive({
   optionText: '',
   originalOptionText: ''
 });
+const formulaConfig = reactive({
+  isOpen: false,
+  tableName: '',
+  tableLabel: '',
+  columnKey: '',
+  columnLabel: '',
+  expression: '',
+  originalExpression: '',
+  currentFieldKey: '',
+  foreignTableName: '',
+  foreignColumnKey: '',
+  aggregate: 'sum'
+});
 const pickupAt = ref('');
 const dropoffAt = ref('');
 const holdUntilAt = ref('');
@@ -1416,6 +1540,17 @@ const selectedTableConfig = computed(() =>
 const selectedTableConfigVisibleColumns = computed(() =>
   (selectedTableConfig.value?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key))
 );
+const formulaCurrentColumns = computed(() =>
+  (selectedTableConfig.value?.columns || [])
+    .filter(column => !isHiddenTableConfigColumn(column.key) && column.key !== formulaConfig.columnKey)
+);
+const formulaForeignTables = computed(() =>
+  tableConfigItems.value.filter(table => table.tableName !== formulaConfig.tableName)
+);
+const formulaForeignColumns = computed(() => {
+  const table = tableConfigItems.value.find(item => item.tableName === formulaConfig.foreignTableName);
+  return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
+});
 const visibleTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => table.isVisible)));
 const hiddenTableConfigItems = computed(() => sortTableConfigItems(tableConfigItems.value.filter(table => !table.isVisible)));
 const displayedTableConfigItems = computed(() =>
@@ -2025,13 +2160,50 @@ function validateMiddleChanges() {
 function getMiddleInsertChanges(row) {
   const changes = {};
   for (const column of selectedMiddleTable.value?.columns || []) {
-    if (!column.isEditable) continue;
-    const value = row[column.key];
+    if (!column.isEditable && !isMiddleFormulaColumn(column)) continue;
+    const value = isMiddleFormulaColumn(column) ? getMiddleDisplayCellValue(row, column) : row[column.key];
     if (Array.isArray(value) ? value.length > 0 : String(value ?? '').trim() !== '') {
       changes[column.key] = value;
     }
   }
   return changes;
+}
+
+function getMiddleFormulaUpdates() {
+  const table = selectedMiddleTable.value;
+  const primaryKey = getMiddlePrimaryColumn();
+  const formulaColumns = (table?.columns || []).filter(column => isMiddleFormulaColumn(column) && column.isEditable);
+  if (!table || !primaryKey || !formulaColumns.length) return [];
+
+  return (table.rows || [])
+    .filter(row => !row.__isNew && !row.__pendingDelete)
+    .map(row => {
+      const primaryValue = row[primaryKey];
+      if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') return null;
+      const changes = {};
+      for (const column of formulaColumns) {
+        const value = getMiddleDisplayCellValue(row, column);
+        if (String(value ?? '').trim() !== '') changes[column.key] = value;
+      }
+      if (!Object.keys(changes).length) return null;
+      return { primaryKey: { key: primaryKey, value: primaryValue }, changes };
+    })
+    .filter(Boolean);
+}
+
+function mergeMiddleUpdates(updates, formulaUpdates) {
+  const merged = new Map();
+  const addUpdate = update => {
+    const key = String(update?.primaryKey?.value ?? '');
+    if (!key) return;
+    if (!merged.has(key)) {
+      merged.set(key, { primaryKey: update.primaryKey, changes: {} });
+    }
+    Object.assign(merged.get(key).changes, update.changes || {});
+  };
+  updates.forEach(addUpdate);
+  formulaUpdates.forEach(addUpdate);
+  return [...merged.values()].filter(update => Object.keys(update.changes || {}).length);
 }
 
 async function saveMiddleTableChanges() {
@@ -2047,7 +2219,10 @@ async function saveMiddleTableChanges() {
   const inserts = (selectedMiddleTable.value?.rows || [])
     .filter(row => row.__isNew)
     .map(row => ({ changes: getMiddleInsertChanges(row) }));
-  const updates = Object.values(middleDirtyRows).filter(item => Object.keys(item.changes || {}).length);
+  const updates = mergeMiddleUpdates(
+    Object.values(middleDirtyRows).filter(item => Object.keys(item.changes || {}).length),
+    getMiddleFormulaUpdates()
+  );
   const deletes = Object.values(middlePendingDeletes);
   if ((!inserts.length && !updates.length && !deletes.length) || !selectedMiddleTable.value) return;
 
@@ -2095,6 +2270,58 @@ function isMiddleMultiSelectColumn(column) {
   const dataType = String(column.dataType || '').toLowerCase();
   const columnType = String(column.columnType || '').toLowerCase();
   return dataType === 'json' || columnType === 'json';
+}
+
+function isMiddleFormulaColumn(column) {
+  return Boolean(column?.formulaConfig?.expression);
+}
+
+function hasMiddleRawFormulaValue(row, column) {
+  const raw = row?.__formulaRaw?.[column.key];
+  return raw !== undefined && raw !== null && String(raw).trim() !== '';
+}
+
+function isMiddleFormulaCalculated(row, column) {
+  return isMiddleFormulaColumn(column) && !hasMiddleRawFormulaValue(row, column);
+}
+
+function getMiddleDisplayCellValue(row, column) {
+  if (!isMiddleFormulaColumn(column)) return row?.[column.key];
+  if (hasMiddleRawFormulaValue(row, column)) return row.__formulaRaw[column.key];
+  const calculated = calculateMiddleFormulaValue(row, column);
+  return calculated === '' ? row?.[column.key] : calculated;
+}
+
+function calculateMiddleFormulaValue(row, column) {
+  const expression = String(column?.formulaConfig?.expression || '').trim();
+  if (!expression) return '';
+  if (/\{(?!this\.)[^{}]+\}/.test(expression)) {
+    return row?.[column.key] ?? '';
+  }
+
+  let safeExpression = expression.replace(/\{([^{}]+)\}/g, (_, token) => {
+    const parts = token.split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') {
+      return String(toFormulaNumber(row?.[parts[1]]));
+    }
+    return String(toFormulaNumber(row?.[column.key]));
+  });
+
+  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
+  try {
+    const value = Function(`"use strict"; return (${safeExpression});`)();
+    if (!Number.isFinite(Number(value))) return '';
+    return String(Number(value.toFixed ? value.toFixed(2) : value));
+  } catch {
+    return '';
+  }
+}
+
+function toFormulaNumber(value) {
+  if (value === undefined || value === null || value === '') return 0;
+  const normalized = String(value).replace(/,/g, '').trim();
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function isMiddleFileLikeColumn(column) {
@@ -2715,6 +2942,14 @@ function isTableConfigSelectableColumn(column) {
   return isTableConfigSingleColumn(column) || isTableConfigMultiColumn(column);
 }
 
+function isTableConfigFormulaColumn(column) {
+  return Boolean(column?.formulaConfig?.expression);
+}
+
+function isTableConfigFormulaCandidate(column) {
+  return !isHiddenTableConfigColumn(column?.key);
+}
+
 function getTableConfigColumnOptions(column) {
   if (isTableConfigMultiColumn(column)) return column.selectOptions || [];
   if (isTableConfigSingleColumn(column)) return column.enumValues || [];
@@ -2773,6 +3008,110 @@ function applyFieldOptionConfig() {
   }
   tableConfigStatusText.value = '字段配置已更新，点击保存配置后生效';
   closeFieldOptionConfig();
+}
+
+function openFormulaConfig(table, column) {
+  const expression = String(column.formulaConfig?.expression || '');
+  formulaConfig.isOpen = true;
+  formulaConfig.tableName = table.tableName;
+  formulaConfig.tableLabel = table.tableLabel || table.tableName;
+  formulaConfig.columnKey = column.key;
+  formulaConfig.columnLabel = column.label || column.key;
+  formulaConfig.expression = expression;
+  formulaConfig.originalExpression = expression;
+  formulaConfig.currentFieldKey = '';
+  formulaConfig.foreignTableName = '';
+  formulaConfig.foreignColumnKey = '';
+  formulaConfig.aggregate = 'sum';
+}
+
+function closeFormulaConfig() {
+  formulaConfig.isOpen = false;
+}
+
+function resetFormulaConfig() {
+  formulaConfig.expression = formulaConfig.originalExpression;
+}
+
+function clearFormulaConfig() {
+  formulaConfig.expression = '';
+}
+
+function appendFormulaToken(token) {
+  const current = formulaConfig.expression.trim();
+  formulaConfig.expression = current ? `${current} ${token}` : token;
+}
+
+function insertCurrentFormulaField() {
+  if (!formulaConfig.currentFieldKey) return;
+  appendFormulaToken(`{this.${formulaConfig.currentFieldKey}}`);
+}
+
+function insertForeignFormulaField() {
+  if (!formulaConfig.foreignTableName || !formulaConfig.foreignColumnKey) return;
+  appendFormulaToken(`{${formulaConfig.foreignTableName}.${formulaConfig.foreignColumnKey}.${formulaConfig.aggregate || 'sum'}}`);
+}
+
+function applyFormulaConfig() {
+  const table = tableConfigItems.value.find(item => item.tableName === formulaConfig.tableName);
+  const column = table?.columns?.find(item => item.key === formulaConfig.columnKey);
+  if (!table || !column) {
+    closeFormulaConfig();
+    return;
+  }
+
+  const expression = formulaConfig.expression.trim();
+  if (!expression) {
+    column.formulaConfig = { expression: '', dependencies: [], isEnabled: false };
+  } else {
+    const validationError = validateFormulaExpression(expression);
+    if (validationError) {
+      tableConfigErrorText.value = validationError;
+      return;
+    }
+    column.formulaConfig = {
+      expression,
+      dependencies: extractFormulaExpressionTokens(expression),
+      isEnabled: true
+    };
+  }
+  tableConfigStatusText.value = '公式配置已更新，点击保存配置后生效';
+  tableConfigErrorText.value = '';
+  closeFormulaConfig();
+}
+
+function validateFormulaExpression(expression) {
+  const withoutTokens = expression.replace(/\{[^{}]+\}/g, '');
+  if (/[^0-9+\-*/().,\s]/.test(withoutTokens)) {
+    return '公式只能包含字段、数字、加减乘除和括号';
+  }
+  const tokens = extractFormulaExpressionTokens(expression);
+  if (!tokens.length) return '公式至少需要插入一个字段';
+  const currentColumnKeys = new Set((selectedTableConfig.value?.columns || []).map(column => column.key));
+  for (const token of tokens) {
+    if (token.scope === 'current' && !currentColumnKeys.has(token.columnName)) {
+      return `本表字段不存在：${token.columnName}`;
+    }
+    if (token.scope === 'current' && token.columnName === formulaConfig.columnKey) {
+      return '公式字段不能引用自己';
+    }
+  }
+  return '';
+}
+
+function extractFormulaExpressionTokens(expression) {
+  const tokens = [];
+  const pattern = /\{([^{}]+)\}/g;
+  let match;
+  while ((match = pattern.exec(expression))) {
+    const parts = match[1].split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') {
+      tokens.push({ scope: 'current', columnName: parts[1] });
+    } else if (parts.length === 3) {
+      tokens.push({ scope: 'table', tableName: parts[0], columnName: parts[1], aggregate: parts[2] });
+    }
+  }
+  return tokens;
 }
 
 async function saveTableManagement() {

@@ -53,6 +53,8 @@ const LEGACY_RECEIPT_DIR_NAMES = {
 const USER_TABLE = 'cw_ryb';
 const USER_PERMISSIONS = ['administrator', 'fleet_manager', 'sales', 'finance'];
 const PASSWORD_ENCRYPTION_PREFIX = 'aes-ecb:';
+const FORMULA_VIEW_PREFIX = 'cw_formula_view_';
+const CONFIG_TABLES = ['cw_table_view_config', 'cw_field_option_config', 'cw_formula_field_config'];
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -562,6 +564,7 @@ async function listMiddlePlatformTables() {
   try {
     await ensureTableViewConfigTable(conn);
     await ensureDefaultTableViewConfig(conn);
+    await ensureFormulaFieldConfigTable(conn);
 
     const [configs] = await conn.execute(`
       SELECT table_name, table_label, visible_fields
@@ -570,13 +573,18 @@ async function listMiddlePlatformTables() {
       ORDER BY sort_order ASC, id ASC
     `);
     const schemaTables = await getSchemaTables(conn);
+    const formulaConfigsByTable = await getFormulaConfigsByTable(conn, schemaTables);
     const tables = [];
 
     for (const config of configs) {
       const schemaTable = schemaTables.find(table => table.tableName === config.table_name);
       if (!schemaTable) continue;
+      const formulaConfigs = formulaConfigsByTable.get(schemaTable.tableName) || [];
+      const viewName = formulaConfigs.length
+        ? await syncFormulaView(conn, schemaTable, formulaConfigs)
+        : '';
 
-      const allowedColumns = schemaTable.columns;
+      const allowedColumns = attachFormulaConfigsToColumns(schemaTable, formulaConfigs);
       const configuredFields = parseJsonArray(config.visible_fields);
       const visibleKeys = configuredFields.length
         ? configuredFields.filter(field => allowedColumns.some(column => column.key === field))
@@ -594,19 +602,21 @@ async function listMiddlePlatformTables() {
       const orderSql = buildMiddleTableOrderSql(schemaTable.tableName, allowedColumns);
       const [rows] = await conn.query(`
         SELECT ${selectSql}
-        FROM ${escapeIdentifier(schemaTable.tableName)}
+        FROM ${escapeIdentifier(viewName || schemaTable.tableName)}
         ${orderSql}
         LIMIT 500
       `);
+      const hydratedRows = await attachFormulaRawValues(conn, schemaTable, primaryKeyColumn, formulaConfigs, rows);
 
       tables.push({
         key: schemaTable.tableName,
         label: config.table_label || schemaTable.tableComment || schemaTable.tableName,
         databaseName: schemaTable.tableName,
+        viewName,
         primaryKey: primaryKeyColumn?.key || '',
         role: '',
         columns,
-        rows
+        rows: hydratedRows
       });
     }
 
@@ -766,8 +776,10 @@ async function getTableManagementConfig() {
   try {
     await ensureTableViewConfigTable(conn);
     await ensureFieldOptionConfigTable(conn);
+    await ensureFormulaFieldConfigTable(conn);
     await ensureDefaultTableViewConfig(conn);
     const schemaTables = await getSchemaTables(conn);
+    const formulaConfigsByTable = await getFormulaConfigsByTable(conn, schemaTables);
     const [configs] = await conn.execute(`
       SELECT table_name, table_label, is_visible, visible_fields, sort_order
       FROM cw_table_view_config
@@ -788,7 +800,7 @@ async function getTableManagementConfig() {
         visibleFields: config
           ? configuredVisibleFields
           : getConfigurableTableFields(table),
-        columns: table.columns
+        columns: attachFormulaConfigsToColumns(table, formulaConfigsByTable.get(table.tableName) || [])
       };
     });
 
@@ -804,6 +816,7 @@ async function saveTableManagementConfig(payload) {
   try {
     await ensureTableViewConfigTable(conn);
     await ensureFieldOptionConfigTable(conn);
+    await ensureFormulaFieldConfigTable(conn);
     const schemaTables = await getSchemaTables(conn);
     const schemaMap = new Map(schemaTables.map(table => [table.tableName, table]));
 
@@ -846,30 +859,41 @@ async function saveTableManagementConfig(payload) {
       const submittedColumns = Array.isArray(item.columns) ? item.columns : [];
       for (const column of submittedColumns) {
         const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
-        if (!schemaColumn || !isConfigurableSelectColumn(schemaColumn)) continue;
-        const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
-          ? column.selectOptions
-          : column.enumValues;
-        const options = uniqueStrings(Array.isArray(rawOptions) ? rawOptions : []);
+        if (!schemaColumn) continue;
 
-        if (!options.length) {
-          await conn.execute(
-            `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
-            [schemaTable.tableName, schemaColumn.key]
-          );
-          continue;
+        if (isConfigurableSelectColumn(schemaColumn)) {
+          const rawOptions = Array.isArray(column.selectOptions) && column.selectOptions.length
+            ? column.selectOptions
+            : column.enumValues;
+          const options = uniqueStrings(Array.isArray(rawOptions) ? rawOptions : []);
+
+          if (!options.length) {
+            await conn.execute(
+              `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
+              [schemaTable.tableName, schemaColumn.key]
+            );
+          } else {
+            await conn.execute(
+              `INSERT INTO cw_field_option_config (
+                table_name,
+                column_name,
+                options_json
+              ) VALUES (?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                options_json = VALUES(options_json)`,
+              [schemaTable.tableName, schemaColumn.key, JSON.stringify(options)]
+            );
+          }
         }
 
-        await conn.execute(
-          `INSERT INTO cw_field_option_config (
-            table_name,
-            column_name,
-            options_json
-          ) VALUES (?, ?, ?)
-          ON DUPLICATE KEY UPDATE
-            options_json = VALUES(options_json)`,
-          [schemaTable.tableName, schemaColumn.key, JSON.stringify(options)]
-        );
+        await saveFormulaColumnConfig(conn, schemaTable, schemaColumn, column.formulaConfig, schemaMap);
+      }
+
+      const savedFormulaConfigs = await getFormulaConfigsForTable(conn, schemaTable);
+      if (savedFormulaConfigs.length) {
+        await syncFormulaView(conn, schemaTable, savedFormulaConfigs);
+      } else {
+        await dropFormulaView(conn, schemaTable.tableName);
       }
     }
 
@@ -1247,6 +1271,20 @@ async function ensureFieldOptionConfigTable(conn) {
   ) DEFAULT CHARSET=utf8mb4 COMMENT='字段选项配置'`);
 }
 
+async function ensureFormulaFieldConfigTable(conn) {
+  await conn.execute(`CREATE TABLE IF NOT EXISTS cw_formula_field_config (
+    id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    table_name VARCHAR(100) NOT NULL COMMENT '数据库表名',
+    column_name VARCHAR(100) NOT NULL COMMENT '数据库字段名',
+    expression TEXT NULL COMMENT '公式表达式',
+    dependencies_json JSON NULL COMMENT '公式依赖字段',
+    is_enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    UNIQUE KEY uk_table_column (table_name, column_name)
+  ) DEFAULT CHARSET=utf8mb4 COMMENT='公式字段配置'`);
+}
+
 async function ensureDefaultTableViewConfig(conn) {
   const schemaTables = await getSchemaTables(conn);
 
@@ -1282,15 +1320,17 @@ function getConfigurableTableFields(table) {
 
 async function getSchemaTables(conn) {
   await ensureFieldOptionConfigTable(conn);
+  await ensureFormulaFieldConfigTable(conn);
+  const configTablePlaceholders = CONFIG_TABLES.map(() => '?').join(', ');
   const [tableRows] = await conn.execute(`
     SELECT TABLE_NAME AS tableName, TABLE_COMMENT AS tableComment
     FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_TYPE = 'BASE TABLE'
       AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
-      AND TABLE_NAME NOT IN ('cw_table_view_config', 'cw_field_option_config')
+      AND TABLE_NAME NOT IN (${configTablePlaceholders})
     ORDER BY TABLE_NAME
-  `);
+  `, CONFIG_TABLES);
 
   const [columnRows] = await conn.execute(`
     SELECT
@@ -1306,9 +1346,9 @@ async function getSchemaTables(conn) {
     FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND (TABLE_NAME LIKE 'cw\\_%' OR TABLE_NAME LIKE 'tp\\_%')
-      AND TABLE_NAME NOT IN ('cw_table_view_config', 'cw_field_option_config')
+      AND TABLE_NAME NOT IN (${configTablePlaceholders})
     ORDER BY TABLE_NAME, ORDINAL_POSITION
-  `);
+  `, CONFIG_TABLES);
 
   const wecomSelectOptions = await getWecomSelectOptionsByDbField();
   const configuredSelectOptions = await getConfiguredSelectOptionsByDbField(conn);
@@ -1394,6 +1434,273 @@ async function getConfiguredSelectOptionsByDbField(conn) {
     optionsByField.set(`${row.table_name}::${row.column_name}`, options);
   }
   return optionsByField;
+}
+
+async function getFormulaConfigsByTable(conn, schemaTables) {
+  await ensureFormulaFieldConfigTable(conn);
+  const [rows] = await conn.execute(`
+    SELECT table_name, column_name, expression, dependencies_json, is_enabled
+    FROM cw_formula_field_config
+    WHERE is_enabled = 1
+  `);
+  const schemaByTable = new Map(schemaTables.map(table => [table.tableName, table]));
+  const configsByTable = new Map();
+
+  for (const row of rows) {
+    const schemaTable = schemaByTable.get(row.table_name);
+    if (!schemaTable) continue;
+    const schemaColumn = schemaTable.columns.find(column => column.key === row.column_name);
+    if (!schemaColumn) continue;
+    const config = normalizeFormulaConfig(row);
+    if (!config.expression) continue;
+    if (!configsByTable.has(row.table_name)) configsByTable.set(row.table_name, []);
+    configsByTable.get(row.table_name).push({
+      ...config,
+      columnName: row.column_name
+    });
+  }
+
+  return configsByTable;
+}
+
+async function getFormulaConfigsForTable(conn, schemaTable) {
+  const configsByTable = await getFormulaConfigsByTable(conn, [schemaTable]);
+  return configsByTable.get(schemaTable.tableName) || [];
+}
+
+function normalizeFormulaConfig(rowOrConfig) {
+  const expression = String(rowOrConfig?.expression || '').trim();
+  const dependenciesJson = rowOrConfig?.dependencies_json ?? rowOrConfig?.dependenciesJson;
+  return {
+    expression,
+    dependencies: parseFormulaDependencies(dependenciesJson),
+    isEnabled: rowOrConfig?.is_enabled === undefined ? rowOrConfig?.isEnabled !== false : Boolean(rowOrConfig.is_enabled)
+  };
+}
+
+function parseFormulaDependencies(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function attachFormulaConfigsToColumns(table, formulaConfigs) {
+  const configByColumn = new Map(formulaConfigs.map(config => [config.columnName, config]));
+  return table.columns.map(column => {
+    const config = configByColumn.get(column.key);
+    if (!config) return column;
+    return {
+      ...column,
+      formulaConfig: {
+        expression: config.expression,
+        dependencies: config.dependencies,
+        isEnabled: true
+      }
+    };
+  });
+}
+
+async function saveFormulaColumnConfig(conn, schemaTable, schemaColumn, submittedConfig, schemaMap = new Map()) {
+  const expression = String(submittedConfig?.expression || '').trim();
+  const shouldDelete = !submittedConfig || submittedConfig.isEnabled === false || !expression;
+
+  if (shouldDelete) {
+    await conn.execute(
+      `DELETE FROM cw_formula_field_config WHERE table_name = ? AND column_name = ?`,
+      [schemaTable.tableName, schemaColumn.key]
+    );
+    return;
+  }
+
+  const dependencies = extractFormulaDependencies(expression);
+  validateFormulaDependencies(schemaTable, schemaColumn, dependencies, schemaMap);
+  validateFormulaExpressionText(expression);
+
+  await conn.execute(
+    `INSERT INTO cw_formula_field_config (
+      table_name,
+      column_name,
+      expression,
+      dependencies_json,
+      is_enabled
+    ) VALUES (?, ?, ?, ?, 1)
+    ON DUPLICATE KEY UPDATE
+      expression = VALUES(expression),
+      dependencies_json = VALUES(dependencies_json),
+      is_enabled = VALUES(is_enabled)`,
+    [schemaTable.tableName, schemaColumn.key, expression, JSON.stringify(dependencies)]
+  );
+}
+
+function validateFormulaExpressionText(expression) {
+  const withoutTokens = expression.replace(/\{[^{}]+\}/g, '');
+  if (/[^0-9+\-*/().,\s]/.test(withoutTokens)) {
+    throw new Error('公式只能包含字段、数字、加减乘除和括号');
+  }
+}
+
+function extractFormulaDependencies(expression) {
+  const dependencies = [];
+  const seen = new Set();
+  const tokenPattern = /\{([^{}]+)\}/g;
+  let match;
+  while ((match = tokenPattern.exec(expression))) {
+    const dependency = parseFormulaToken(match[1]);
+    const key = `${dependency.tableName || 'this'}::${dependency.columnName}::${dependency.aggregate || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dependencies.push(dependency);
+  }
+  return dependencies;
+}
+
+function parseFormulaToken(token) {
+  const parts = String(token || '').split('.').map(part => part.trim()).filter(Boolean);
+  if (parts.length === 1) {
+    return { scope: 'current', tableName: '', columnName: parts[0], aggregate: '' };
+  }
+  if (parts.length === 2 && parts[0] === 'this') {
+    return { scope: 'current', tableName: '', columnName: parts[1], aggregate: '' };
+  }
+  if (parts.length === 3) {
+    return { scope: 'table', tableName: parts[0], columnName: parts[1], aggregate: parts[2] };
+  }
+  throw new Error(`公式字段引用格式无效：{${token}}`);
+}
+
+function validateFormulaDependencies(schemaTable, schemaColumn, dependencies, schemaMap = new Map()) {
+  const currentColumns = new Set(schemaTable.columns.map(column => column.key));
+  const allowedAggregates = new Set(['sum', 'avg', 'count', 'max', 'min', 'first']);
+  if (!dependencies.length) {
+    throw new Error('公式至少需要引用一个字段');
+  }
+
+  for (const dependency of dependencies) {
+    if (dependency.scope === 'current') {
+      if (!currentColumns.has(dependency.columnName)) {
+        throw new Error(`公式引用了不存在的本表字段：${dependency.columnName}`);
+      }
+      if (dependency.columnName === schemaColumn.key) {
+        throw new Error('公式字段不能引用自己');
+      }
+      continue;
+    }
+
+    if (!allowedAggregates.has(dependency.aggregate)) {
+      throw new Error(`其他表字段必须选择聚合方式：${dependency.tableName}.${dependency.columnName}`);
+    }
+    const foreignTable = schemaMap.get(dependency.tableName);
+    if (!foreignTable) {
+      throw new Error(`公式引用了不存在的其他表：${dependency.tableName}`);
+    }
+    if (!foreignTable.columns.some(column => column.key === dependency.columnName)) {
+      throw new Error(`公式引用了不存在的其他表字段：${dependency.tableName}.${dependency.columnName}`);
+    }
+  }
+}
+
+async function syncFormulaView(conn, schemaTable, formulaConfigs) {
+  const viewName = getFormulaViewName(schemaTable.tableName);
+  const formulaByColumn = new Map(formulaConfigs.map(config => [config.columnName, config]));
+  const selectParts = schemaTable.columns.map(column => {
+    const config = formulaByColumn.get(column.key);
+    if (!config) return `base.${escapeIdentifier(column.key)} AS ${escapeIdentifier(column.key)}`;
+    const expressionSql = buildFormulaSqlExpression(schemaTable, config.expression);
+    const emptyCheck = `base.${escapeIdentifier(column.key)} IS NULL OR CAST(base.${escapeIdentifier(column.key)} AS CHAR) = ''`;
+    return `IF(${emptyCheck}, ${expressionSql}, base.${escapeIdentifier(column.key)}) AS ${escapeIdentifier(column.key)}`;
+  });
+
+  await conn.query(`
+    CREATE OR REPLACE VIEW ${escapeIdentifier(viewName)} AS
+    SELECT ${selectParts.join(', ')}
+    FROM ${escapeIdentifier(schemaTable.tableName)} base
+  `);
+
+  return viewName;
+}
+
+async function dropFormulaView(conn, tableName) {
+  await conn.query(`DROP VIEW IF EXISTS ${escapeIdentifier(getFormulaViewName(tableName))}`);
+}
+
+async function attachFormulaRawValues(conn, schemaTable, primaryKeyColumn, formulaConfigs, rows) {
+  if (!formulaConfigs.length || !primaryKeyColumn || !rows.length) return rows;
+  const formulaColumns = formulaConfigs.map(config => config.columnName);
+  const ids = rows
+    .map(row => row[primaryKeyColumn.key])
+    .filter(value => value !== undefined && value !== null && String(value) !== '');
+  if (!ids.length) return rows;
+
+  const rawSelect = [primaryKeyColumn.key, ...formulaColumns]
+    .map(columnName => escapeIdentifier(columnName))
+    .join(', ');
+  const [rawRows] = await conn.query(
+    `SELECT ${rawSelect}
+     FROM ${escapeIdentifier(schemaTable.tableName)}
+     WHERE ${escapeIdentifier(primaryKeyColumn.key)} IN (${ids.map(() => '?').join(', ')})`,
+    ids
+  );
+  const rawById = new Map(rawRows.map(row => [String(row[primaryKeyColumn.key]), row]));
+
+  return rows.map(row => {
+    const raw = rawById.get(String(row[primaryKeyColumn.key]));
+    if (!raw) return row;
+    const formulaRaw = {};
+    for (const columnName of formulaColumns) {
+      formulaRaw[columnName] = raw[columnName];
+    }
+    return {
+      ...row,
+      __formulaRaw: formulaRaw
+    };
+  });
+}
+
+function getFormulaViewName(tableName) {
+  const safe = String(tableName || '').replace(/[^a-zA-Z0-9_]/g, '_');
+  return `${FORMULA_VIEW_PREFIX}${safe}`;
+}
+
+function buildFormulaSqlExpression(schemaTable, expression) {
+  validateFormulaExpressionText(expression);
+  return expression.replace(/\{([^{}]+)\}/g, (_, token) => {
+    const dependency = parseFormulaToken(token);
+    if (dependency.scope === 'current') {
+      if (!schemaTable.columns.some(column => column.key === dependency.columnName)) {
+        throw new Error(`公式引用了不存在的本表字段：${dependency.columnName}`);
+      }
+      return `COALESCE(base.${escapeIdentifier(dependency.columnName)}, 0)`;
+    }
+    return buildFormulaAggregateSql(dependency);
+  });
+}
+
+function buildFormulaAggregateSql(dependency) {
+  const tableName = escapeIdentifier(dependency.tableName);
+  const columnName = escapeIdentifier(dependency.columnName);
+  if (dependency.aggregate === 'count') {
+    return `(SELECT COUNT(${columnName}) FROM ${tableName})`;
+  }
+  if (dependency.aggregate === 'sum') {
+    return `(SELECT COALESCE(SUM(${columnName}), 0) FROM ${tableName})`;
+  }
+  if (dependency.aggregate === 'avg') {
+    return `(SELECT COALESCE(AVG(${columnName}), 0) FROM ${tableName})`;
+  }
+  if (dependency.aggregate === 'max') {
+    return `(SELECT COALESCE(MAX(${columnName}), 0) FROM ${tableName})`;
+  }
+  if (dependency.aggregate === 'min') {
+    return `(SELECT COALESCE(MIN(${columnName}), 0) FROM ${tableName})`;
+  }
+  if (dependency.aggregate === 'first') {
+    return `(SELECT ${columnName} FROM ${tableName} LIMIT 1)`;
+  }
+  throw new Error(`未知公式聚合方式：${dependency.aggregate}`);
 }
 
 function getSelectOptionsForColumn(optionsByField, tableComment, columnComment) {
