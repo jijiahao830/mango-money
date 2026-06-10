@@ -2182,6 +2182,7 @@ function getMiddleFormulaUpdates() {
       if (primaryValue === undefined || primaryValue === null || String(primaryValue) === '') return null;
       const changes = {};
       for (const column of formulaColumns) {
+        if (hasMiddleRawFormulaValue(row, column)) continue;
         const value = getMiddleDisplayCellValue(row, column);
         if (String(value ?? '').trim() !== '') changes[column.key] = value;
       }
