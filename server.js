@@ -57,6 +57,9 @@ const FORMULA_VIEW_PREFIX = 'cw_formula_view_';
 const CONFIG_TABLES = ['cw_table_view_config', 'cw_field_option_config', 'cw_formula_field_config'];
 const DEFAULT_JSON_BODY_LIMIT = 1024 * 1024;
 const MIDDLE_TABLE_JSON_BODY_LIMIT = 25 * 1024 * 1024;
+const SYSTEM_GENERATED_COLUMNS = new Map([
+  ['cw_ddjszb', new Set(['ddbh'])]
+]);
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -1626,6 +1629,7 @@ async function getSchemaTables(conn) {
       columnKey: column.columnKey || '',
       extra: column.extra || '',
       isEditable: isEditableMiddleColumn(column),
+      isSystemGenerated: isSystemGeneratedMiddleColumn(column.tableName, column.columnName),
       ordinalPosition: column.ordinalPosition
     });
   }
@@ -2853,10 +2857,15 @@ function parseEnumValues(columnType) {
 function isEditableMiddleColumn(column) {
   const key = column.columnName;
   const extra = String(column.extra || '').toLowerCase();
+  if (isSystemGeneratedMiddleColumn(column.tableName, key)) return false;
   if (column.columnKey === 'PRI') return false;
   if (extra.includes('auto_increment') || extra.includes('generated')) return false;
   if (['id', 'create_time', 'update_time'].includes(key)) return false;
   return true;
+}
+
+function isSystemGeneratedMiddleColumn(tableName, columnName) {
+  return Boolean(SYSTEM_GENERATED_COLUMNS.get(tableName)?.has(columnName));
 }
 
 function getPrimaryKeyColumn(schemaTable) {

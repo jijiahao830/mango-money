@@ -506,6 +506,7 @@ sudo apt install -y chromium-browser webp
 
 - 报销费用明细表（`cw_bxfymxb`）的报销人字段（`bxr`）从人员表（`cw_ryb`）的姓名/显示名字段（`display_name`）读取。
 - 订单结算主表（`cw_ddjszb`）的车辆归属字段（`clgs`）使用“根据数据表获取”：按订单结算主表车牌（`cp`）匹配车型参数表车牌号（`cph`），原样引用车型参数表来源（`ly`）。
+- 订单结算主表（`cw_ddjszb`）的订单编号字段（`ddbh`）属于系统生成字段，中台只展示不允许人工修改；保存接口也会拒绝提交该字段的修改。
 - 报销费用明细表（`cw_bxfymxb`）的合计字段（`hj`）为计算字段。
 - 报销费用明细表（`cw_bxfymxb`）的报销单字段（`bxd`）为图片字段，数据库类型为 `json`。
 
