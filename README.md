@@ -387,9 +387,48 @@ sudo apt install -y chromium-browser webp
 - 公式支持本表字段四则运算，例如 `{this.sr} - {this.cb}`。
 - 公式支持日期差函数 `days(日期1, 日期2)`，返回两个日期相差天数；支持 `today()` 表示当天日期。
 - 公式支持空值判断 `empty(字段)` 和简单条件文本 `if(条件,"是","否")`，用于“是否影响订单”等字段。
+- 公式支持 `eq(字段,"文本")` 做文本相等判断。
+- 公式支持 `dateadd(日期,数量,"day/month")` 做日期加天或加月。
+- 公式支持跨表条件求和 `sumif(外表.匹配字段,{this.本表字段},外表.求和字段)`；可追加多组匹配条件，例如同车牌、同月份求和。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
+
+### POS 公式配置清单
+
+来源：`财务.pos`。本节只记录已经按 POS 明确公式写入数据库配置的字段。
+
+| 数据库表名 | 字段名 | POS 公式说明 | 系统公式 |
+| --- | --- | --- | --- |
+| `cw_bxxfjlb` | `bxhjfy` | 交强险金额 + 商业险金额 | `{this.jqxje}+{this.syxje}` |
+| `cw_clycb` | `yjxzts` | 预计恢复时间 - 开始日期；如果预计恢复时间或开始日期为空则返回空 | `if(empty({this.yjhfsj}),"",if(empty({this.ksrq}),"",days({this.yjhfsj},{this.ksrq})))` |
+| `cw_clycb` | `sjxzts` | 实际恢复时间 - 开始日期；如果实际恢复时间或开始日期为空则返回空 | `if(empty({this.sjhfsj}),"",if(empty({this.ksrq}),"",days({this.sjhfsj},{this.ksrq})))` |
+| `cw_clycb` | `jlkyts` | 预计恢复时间 - 今天；如果预计恢复时间为空则返回空 | `if(empty({this.yjhfsj}),"",days({this.yjhfsj},today()))` |
+| `cw_clycb` | `sfyxdd` | 今天是否到预计恢复时间，到了填是，没到填否；如果预计恢复时间为空则返回空 | `if(empty({this.yjhfsj}),"",if(days(today(),{this.yjhfsj})>=0,"是","否"))` |
+| `cw_gkczb` | `days_to_contract_expire` | 合作到期日 - 今天；合作到期日为空则返回空 | `if(empty({this.cooperation_expire_date}),"",days({this.cooperation_expire_date},today()))` |
+| `cw_gkczb` | `is_expire_warning` | 合作到期日 - 今天 <= 7 填是，否则填否；合作到期日为空则返回空 | `if(empty({this.cooperation_expire_date}),"",if(days({this.cooperation_expire_date},today())<=7,"是","否"))` |
+| `cw_gkczb` | `current_cycle_unpaid` | 本周期应结金额 - 本周期已结金额；本周期应结金额为空则返回空 | `if(empty({this.current_cycle_payable}),"",{this.current_cycle_payable}-{this.current_cycle_paid})` |
+| `cw_gkczb` | `next_settlement_date` | 结算周期是日结则今天 + 1，周结则今天 + 7，月结则今天 + 1 月；结算周期为空则返回空 | `if(empty({this.settlement_cycle}),"",if(eq({this.settlement_cycle},"日结"),dateadd(today(),1,"day"),if(eq({this.settlement_cycle},"周结"),dateadd(today(),7,"day"),dateadd(today(),1,"month"))))` |
+| `cw_gkhzmxb` | `syts` | 出车时间 - 回车时间；如果回车时间为空，则计算从出车时间到今天的天数 | `if(empty({this.ccsj}),"",if(empty({this.hcsj}),days(today(),{this.ccsj}),days({this.hcsj},{this.ccsj})))` |
+| `cw_gkclcblrb` | `zyccb` | 同一个车牌的所有付款金额求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.fkje)` |
+| `cw_gkclcblrb` | `dycb` | 月份中，同一个车牌的所有付款金额求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.yf,{this.yf},cw_dccbb.fkje)` |
+| `cw_gkclcblrb` | `wxfy` | 同一个车牌的所有维修费用求和 | `sumif(cw_wxcbb.plate_number,{this.cp},cw_wxcbb.payment_amount)` |
+| `cw_gkclcblrb` | `pjcgfy` | 同一个车牌的所有配件采购费用求和 | `sumif(cw_pjcgb.cp,{this.cp},cw_pjcgb.cgje)` |
+| `cw_gkclcblrb` | `bc` | 同一个车牌的所有板车付款金额求和 | `sumif(cw_bcfymxb.tycp,{this.cp},cw_bcfymxb.fkje)` |
+| `cw_gkclcblrb` | `srje` | 月份中，同一个车牌的实际租金收入求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.yf,{this.yf},cw_dccbb.sjzjsr)` |
+| `cw_gkclcblrb` | `gclqkje` | 同一个车牌的所有应补金额求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.ybje)` |
+| `cw_gkclcblrb` | `ndsjczts` | 同一个车牌的所有用车天数求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.ycts)` |
+| `cw_gkclcblrb` | `clydczl` | 月份中，同一个车牌的所有用车天数求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.fyfsy,{this.yf},cw_ddjszb.ycts)` |
+| `cw_gkclcblrb` | `clndczl` | 年度实际出租天数 / 365 | `{this.ndsjczts}/365` |
+| `cw_gkclcblrb` | `clbyczl` | 车辆月度出租率 / 365 | `{this.clydczl}/365` |
+| `cw_gkclcblrb` | `dylr` | 收入金额 - 当月成本 | `{this.srje}-{this.dycb}` |
+| `cw_jdfktzb` | `lr` | 付款金额 - 实际客户金额 | `{this.fkje}-{this.sskhje}` |
+
+注意：
+
+- 上表公式已写入 `cw_formula_field_config`，字段类型同步标记为 `calc`。
+- `cw_gkclcblrb` 的跨表公式依赖 `sumif`，由数据库视图实时按当前行车牌/月进行聚合。
+- `cw_jdfktzb.lr` 和部分跨表求和源字段当前数据库类型存在 `date/datetime`，已按 POS 关系写入公式；结果是否准确取决于源字段数据能否正确转换为数字。
 
 ### 字段类型标签
 

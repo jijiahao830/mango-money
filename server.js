@@ -1827,7 +1827,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -1982,7 +1982,72 @@ function buildFormulaSqlValue(schemaTable, value) {
   }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return sqlStringLiteral(stringMatch[1]);
+  const sumIfArgs = parseFormulaFunctionArgs(text, 'sumif');
+  if (sumIfArgs) return buildFormulaSqlSumIf(schemaTable, sumIfArgs);
+  const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
+  if (dateAddArgs) return buildFormulaSqlDateAdd(schemaTable, dateAddArgs);
+  if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
+    return buildFormulaSqlNumericExpression(schemaTable, text);
+  }
   return buildFormulaSqlTerm(schemaTable, text);
+}
+
+function buildFormulaSqlSumIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('sumif 参数格式应为：sumif(匹配字段, 当前字段, 求和字段)，可追加多组匹配字段和当前字段');
+  }
+  const sumColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const tableName = sumColumn.tableName;
+  const conditions = [];
+  for (let index = 0; index < args.length - 1; index += 2) {
+    const matchColumn = parseFormulaQualifiedColumn(args[index]);
+    if (matchColumn.tableName !== tableName) {
+      throw new Error('sumif 的匹配字段和求和字段必须来自同一张表');
+    }
+    conditions.push(`${escapeIdentifier(matchColumn.columnName)} = ${buildFormulaSqlCompareArg(schemaTable, args[index + 1])}`);
+  }
+  return `(SELECT COALESCE(SUM(CAST(${escapeIdentifier(sumColumn.columnName)} AS DECIMAL(18,2))), 0) FROM ${escapeIdentifier(tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function parseFormulaQualifiedColumn(value) {
+  const parts = String(value || '').trim().split('.').map(part => part.trim()).filter(Boolean);
+  if (parts.length !== 2) throw new Error(`字段引用格式无效：${value}`);
+  return { tableName: parts[0], columnName: parts[1] };
+}
+
+function buildFormulaSqlCompareArg(schemaTable, value) {
+  const text = String(value || '').trim();
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (!tokenMatch) return sqlStringLiteral(text);
+  const dependency = parseFormulaToken(tokenMatch[1]);
+  if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
+    throw new Error(`公式引用了不存在的本表字段：${tokenMatch[1]}`);
+  }
+  return `base.${escapeIdentifier(dependency.columnName)}`;
+}
+
+function buildFormulaSqlDateAdd(schemaTable, args) {
+  if (args.length !== 3) throw new Error('dateadd 参数格式应为：dateadd(日期, 数量, "day/month")');
+  const amount = Number(String(args[1] || '').trim());
+  if (!Number.isFinite(amount)) throw new Error(`dateadd 数量无效：${args[1]}`);
+  const unitMatch = String(args[2] || '').trim().match(/^"?(day|month)"?$/i);
+  if (!unitMatch) throw new Error(`dateadd 单位只支持 day 或 month：${args[2]}`);
+  const unit = unitMatch[1].toUpperCase();
+  return `DATE_ADD(${buildFormulaSqlDateArg(schemaTable, args[0])}, INTERVAL ${Math.trunc(amount)} ${unit})`;
+}
+
+function buildFormulaSqlNumericExpression(schemaTable, expression) {
+  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
+    const dependency = parseFormulaToken(token);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
+      throw new Error(`公式引用了不存在的本表字段：${token}`);
+    }
+    return `COALESCE(base.${escapeIdentifier(dependency.columnName)}, 0)`;
+  });
+  if (/[^0-9+\-*/().,\s`a-zA-Z_]/.test(safeExpression)) {
+    throw new Error(`公式数值表达式格式无效：${expression}`);
+  }
+  return `(${safeExpression})`;
 }
 
 function buildFormulaSqlCondition(schemaTable, condition) {
@@ -1992,10 +2057,31 @@ function buildFormulaSqlCondition(schemaTable, condition) {
     const valueSql = buildFormulaSqlDateArg(schemaTable, emptyArgs[0]);
     return `(${valueSql} IS NULL OR CAST(${valueSql} AS CHAR) = '')`;
   }
+  const eqArgs = parseFormulaFunctionArgs(condition, 'eq');
+  if (eqArgs) {
+    if (eqArgs.length !== 2) throw new Error(`公式 eq 参数数量无效：${condition}`);
+    return `${buildFormulaSqlRawArg(schemaTable, eqArgs[0])} = ${buildFormulaSqlRawArg(schemaTable, eqArgs[1])}`;
+  }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) throw new Error(`公式条件格式无效：${condition}`);
   const operator = match[2] === '==' ? '=' : match[2];
   return `${buildFormulaSqlTerm(schemaTable, match[1])} ${operator} ${Number(match[3])}`;
+}
+
+function buildFormulaSqlRawArg(schemaTable, value) {
+  const text = String(value || '').trim();
+  const stringMatch = text.match(/^"([^"]*)"$/);
+  if (stringMatch) return sqlStringLiteral(stringMatch[1]);
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
+      throw new Error(`公式引用了不存在的本表字段：${tokenMatch[1]}`);
+    }
+    return `base.${escapeIdentifier(dependency.columnName)}`;
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return String(Number(text));
+  return sqlStringLiteral(text);
 }
 
 function buildFormulaSqlTerm(schemaTable, term) {
@@ -2178,7 +2264,52 @@ function evaluateFormulaValue(schemaTable, expression, row) {
   }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
+  if (parseFormulaFunctionArgs(text, 'sumif')) return '';
+  const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
+  if (dateAddArgs) return evaluateFormulaDateAdd(schemaTable, dateAddArgs, row);
+  if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
+    return evaluateFormulaNumericExpression(schemaTable, text, row);
+  }
   return evaluateFormulaTerm(schemaTable, text, row);
+}
+
+function formatFormulaDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function evaluateFormulaDateAdd(schemaTable, args, row) {
+  if (args.length !== 3) return '';
+  const date = evaluateFormulaDateArg(schemaTable, args[0], row);
+  const amount = Number(String(args[1] || '').trim());
+  const unitMatch = String(args[2] || '').trim().match(/^"?(day|month)"?$/i);
+  if (!date || !Number.isFinite(amount) || !unitMatch) return '';
+  const result = new Date(date.getTime());
+  if (unitMatch[1].toLowerCase() === 'month') {
+    result.setMonth(result.getMonth() + Math.trunc(amount));
+  } else {
+    result.setDate(result.getDate() + Math.trunc(amount));
+  }
+  return formatFormulaDate(result);
+}
+
+function evaluateFormulaNumericExpression(schemaTable, expression, row) {
+  const currentColumns = new Set(schemaTable.columns.map(column => column.key));
+  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
+    const dependency = parseFormulaToken(token);
+    if (dependency.scope !== 'current' || !currentColumns.has(dependency.columnName)) return '0';
+    return String(toFormulaNumber(row[dependency.columnName]));
+  });
+  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
+  try {
+    const value = Function(`"use strict"; return (${safeExpression});`)();
+    return Number.isFinite(Number(value)) ? Number(value) : '';
+  } catch {
+    return '';
+  }
 }
 
 function evaluateFormulaCondition(schemaTable, condition, row) {
@@ -2186,6 +2317,11 @@ function evaluateFormulaCondition(schemaTable, condition, row) {
   if (emptyArgs) {
     if (emptyArgs.length !== 1) return false;
     return evaluateFormulaRawValue(schemaTable, emptyArgs[0], row) === '';
+  }
+  const eqArgs = parseFormulaFunctionArgs(condition, 'eq');
+  if (eqArgs) {
+    if (eqArgs.length !== 2) return false;
+    return evaluateFormulaRawValue(schemaTable, eqArgs[0], row) === evaluateFormulaRawValue(schemaTable, eqArgs[1], row);
   }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) return false;

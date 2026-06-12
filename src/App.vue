@@ -3115,7 +3115,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3136,7 +3136,51 @@ function evaluateMiddleFormulaValue(row, expression) {
   }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
+  if (parseMiddleFormulaFunctionArgs(text, 'sumif')) return '';
+  const dateAddArgs = parseMiddleFormulaFunctionArgs(text, 'dateadd');
+  if (dateAddArgs) return evaluateMiddleFormulaDateAdd(row, dateAddArgs);
+  if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
+    return evaluateMiddleFormulaNumericExpression(row, text);
+  }
   return evaluateMiddleFormulaTerm(row, text);
+}
+
+function formatMiddleFormulaDate(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function evaluateMiddleFormulaDateAdd(row, args) {
+  if (args.length !== 3) return '';
+  const date = evaluateMiddleFormulaDateArg(row, args[0]);
+  const amount = Number(String(args[1] || '').trim());
+  const unitMatch = String(args[2] || '').trim().match(/^"?(day|month)"?$/i);
+  if (!date || !Number.isFinite(amount) || !unitMatch) return '';
+  const result = new Date(date.getTime());
+  if (unitMatch[1].toLowerCase() === 'month') {
+    result.setMonth(result.getMonth() + Math.trunc(amount));
+  } else {
+    result.setDate(result.getDate() + Math.trunc(amount));
+  }
+  return formatMiddleFormulaDate(result);
+}
+
+function evaluateMiddleFormulaNumericExpression(row, expression) {
+  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
+    const parts = token.split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') return String(toFormulaNumber(row?.[parts[1]]));
+    return '0';
+  });
+  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
+  try {
+    const value = Function(`"use strict"; return (${safeExpression});`)();
+    return Number.isFinite(Number(value)) ? Number(value) : '';
+  } catch {
+    return '';
+  }
 }
 
 function evaluateMiddleFormulaCondition(row, condition) {
@@ -3144,6 +3188,11 @@ function evaluateMiddleFormulaCondition(row, condition) {
   if (emptyArgs) {
     if (emptyArgs.length !== 1) return false;
     return evaluateMiddleFormulaRawValue(row, emptyArgs[0]) === '';
+  }
+  const eqArgs = parseMiddleFormulaFunctionArgs(condition, 'eq');
+  if (eqArgs) {
+    if (eqArgs.length !== 2) return false;
+    return evaluateMiddleFormulaRawValue(row, eqArgs[0]) === evaluateMiddleFormulaRawValue(row, eqArgs[1]);
   }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) return false;
@@ -4146,9 +4195,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/dateadd/eq 和简单条件';
   }
-  if (!/\b(days|today|if|empty)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);
