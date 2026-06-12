@@ -1568,6 +1568,7 @@ let confirmDialogResolver = null;
 
 const DEFAULT_PICKUP_DROPOFF_METHOD = '昆明 · 到店取车';
 const STORED_USER_KEY = 'mango_finance_user';
+const DEFAULT_LOGIN_EXPIRE_HOURS = 8;
 const permissionOptions = [
   { value: 'finance', label: '财务' },
   { value: 'sales', label: '销售' },
@@ -3265,7 +3266,7 @@ async function login() {
     }
 
     currentUser.value = data.user;
-    localStorage.setItem(STORED_USER_KEY, JSON.stringify(data.user));
+    writeStoredUser(data.user, data.expiresAt, data.expireHours);
     loginForm.password = '';
   } catch (error) {
     loginError.value = error?.message || String(error);
@@ -3284,10 +3285,26 @@ function logout() {
   clearAccountState();
 }
 
+function writeStoredUser(user, expiresAt, expireHours = DEFAULT_LOGIN_EXPIRE_HOURS) {
+  const safeExpireHours = Number(expireHours || DEFAULT_LOGIN_EXPIRE_HOURS);
+  const safeExpiresAt = Number(expiresAt || 0) || Date.now() + safeExpireHours * 60 * 60 * 1000;
+  localStorage.setItem(STORED_USER_KEY, JSON.stringify({
+    user,
+    expiresAt: safeExpiresAt
+  }));
+}
+
 function readStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem(STORED_USER_KEY) || 'null');
+    const stored = JSON.parse(localStorage.getItem(STORED_USER_KEY) || 'null');
+    if (!stored) return null;
+    if (!stored.user || !stored.expiresAt || Date.now() >= Number(stored.expiresAt)) {
+      localStorage.removeItem(STORED_USER_KEY);
+      return null;
+    }
+    return stored.user;
   } catch {
+    localStorage.removeItem(STORED_USER_KEY);
     return null;
   }
 }

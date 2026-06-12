@@ -1045,9 +1045,12 @@ async function loginUser(payload) {
       [user.id || null, user.username || '', user.displayName || '', user.permission || '']
     );
 
+    const expireHours = await readLoginExpireHours();
     return {
       ok: true,
-      user
+      user,
+      expireHours,
+      expiresAt: Date.now() + expireHours * 60 * 60 * 1000
     };
   } finally {
     await conn.end();
@@ -2376,6 +2379,13 @@ async function ensureStatementTable(conn) {
 async function readMysqlConfig() {
   const config = await readAppConfig();
   return config.mysql || {};
+}
+
+async function readLoginExpireHours() {
+  const config = await readAppConfig();
+  const hours = Number(config.login?.expireHours || 8);
+  if (!Number.isFinite(hours) || hours <= 0) return 8;
+  return hours;
 }
 
 async function readWecomWebhook() {
