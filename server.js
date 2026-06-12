@@ -1819,10 +1819,15 @@ async function saveFormulaColumnConfig(conn, schemaTable, schemaColumn, submitte
 }
 
 function validateFormulaExpressionText(expression) {
+  if (isAdvancedFormulaExpression(expression)) return;
   const withoutTokens = expression.replace(/\{[^{}]+\}/g, '');
   if (/[^0-9+\-*/().,\s]/.test(withoutTokens)) {
     throw new Error('公式只能包含字段、数字、加减乘除和括号');
   }
+}
+
+function isAdvancedFormulaExpression(expression) {
+  return /\b(days|today|if)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -1948,6 +1953,9 @@ function getFormulaViewName(tableName) {
 }
 
 function buildFormulaSqlExpression(schemaTable, expression) {
+  if (isAdvancedFormulaExpression(expression)) {
+    return buildAdvancedFormulaSqlExpression(schemaTable, expression);
+  }
   validateFormulaExpressionText(expression);
   return expression.replace(/\{([^{}]+)\}/g, (_, token) => {
     const dependency = parseFormulaToken(token);
@@ -1959,6 +1967,50 @@ function buildFormulaSqlExpression(schemaTable, expression) {
     }
     return buildFormulaAggregateSql(dependency);
   });
+}
+
+function buildAdvancedFormulaSqlExpression(schemaTable, expression) {
+  const text = String(expression || '').trim();
+  const ifMatch = text.match(/^if\((.+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)$/i);
+  if (ifMatch) {
+    return `IF(${buildFormulaSqlCondition(schemaTable, ifMatch[1])}, ${sqlStringLiteral(ifMatch[2])}, ${sqlStringLiteral(ifMatch[3])})`;
+  }
+  return buildFormulaSqlTerm(schemaTable, text);
+}
+
+function buildFormulaSqlCondition(schemaTable, condition) {
+  const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) throw new Error(`公式条件格式无效：${condition}`);
+  const operator = match[2] === '==' ? '=' : match[2];
+  return `${buildFormulaSqlTerm(schemaTable, match[1])} ${operator} ${Number(match[3])}`;
+}
+
+function buildFormulaSqlTerm(schemaTable, term) {
+  const text = String(term || '').trim();
+  const daysMatch = text.match(/^days\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i);
+  if (daysMatch) {
+    return `DATEDIFF(${buildFormulaSqlDateArg(schemaTable, daysMatch[1])}, ${buildFormulaSqlDateArg(schemaTable, daysMatch[2])})`;
+  }
+  return buildFormulaSqlDateArg(schemaTable, text);
+}
+
+function buildFormulaSqlDateArg(schemaTable, value) {
+  const text = String(value || '').trim();
+  if (/^today\(\)$/i.test(text)) return 'CURDATE()';
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
+      throw new Error(`公式引用了不存在的本表字段：${tokenMatch[1]}`);
+    }
+    return `base.${escapeIdentifier(dependency.columnName)}`;
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return String(Number(text));
+  throw new Error(`公式参数格式无效：${value}`);
+}
+
+function sqlStringLiteral(value) {
+  return `'${String(value || '').replace(/'/g, "''")}'`;
 }
 
 function buildFormulaAggregateSql(dependency) {
@@ -2042,6 +2094,9 @@ function applyServerFormulaChanges(schemaTable, formulaConfigs, changes, baseRow
 }
 
 function evaluateCurrentRowFormula(schemaTable, expression, row) {
+  if (isAdvancedFormulaExpression(expression)) {
+    return evaluateAdvancedFormulaExpression(schemaTable, expression, row);
+  }
   validateFormulaExpressionText(expression);
   const currentColumns = new Set(schemaTable.columns.map(column => column.key));
   const safeExpression = expression.replace(/\{([^{}]+)\}/g, (_, token) => {
@@ -2057,6 +2112,68 @@ function evaluateCurrentRowFormula(schemaTable, expression, row) {
   } catch {
     return '';
   }
+}
+
+function evaluateAdvancedFormulaExpression(schemaTable, expression, row) {
+  const text = String(expression || '').trim();
+  const ifMatch = text.match(/^if\((.+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)$/i);
+  if (ifMatch) {
+    return evaluateFormulaCondition(schemaTable, ifMatch[1], row) ? ifMatch[2] : ifMatch[3];
+  }
+  const value = evaluateFormulaTerm(schemaTable, text, row);
+  return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(2)) : '';
+}
+
+function evaluateFormulaCondition(schemaTable, condition, row) {
+  const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return false;
+  const left = Number(evaluateFormulaTerm(schemaTable, match[1], row));
+  const right = Number(match[3]);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  switch (match[2]) {
+    case '>': return left > right;
+    case '<': return left < right;
+    case '>=': return left >= right;
+    case '<=': return left <= right;
+    case '=':
+    case '==': return left === right;
+    default: return false;
+  }
+}
+
+function evaluateFormulaTerm(schemaTable, term, row) {
+  const text = String(term || '').trim();
+  const daysMatch = text.match(/^days\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i);
+  if (daysMatch) {
+    const endDate = evaluateFormulaDateArg(schemaTable, daysMatch[1], row);
+    const startDate = evaluateFormulaDateArg(schemaTable, daysMatch[2], row);
+    if (!endDate || !startDate) return '';
+    return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
+  }
+  const dateValue = evaluateFormulaDateArg(schemaTable, text, row);
+  return dateValue ? dateValue.getTime() : toFormulaNumber(text);
+}
+
+function evaluateFormulaDateArg(schemaTable, value, row) {
+  const text = String(value || '').trim();
+  if (/^today\(\)$/i.test(text)) {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) return null;
+    return toFormulaDate(row[dependency.columnName]);
+  }
+  return toFormulaDate(text);
+}
+
+function toFormulaDate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 function toFormulaNumber(value) {

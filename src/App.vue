@@ -3089,6 +3089,9 @@ function updateMiddleFormulaCell(row, column, value) {
 function calculateMiddleFormulaValue(row, column) {
   const expression = String(column?.formulaConfig?.expression || '').trim();
   if (!expression) return '';
+  if (isAdvancedMiddleFormulaExpression(expression)) {
+    return calculateAdvancedMiddleFormulaValue(row, expression);
+  }
   if (/\{(?!this\.)[^{}]+\}/.test(expression)) {
     return row?.[column.key] ?? '';
   }
@@ -3109,6 +3112,71 @@ function calculateMiddleFormulaValue(row, column) {
   } catch {
     return '';
   }
+}
+
+function isAdvancedMiddleFormulaExpression(expression) {
+  return /\b(days|today|if)\s*\(/i.test(String(expression || ''));
+}
+
+function calculateAdvancedMiddleFormulaValue(row, expression) {
+  const text = String(expression || '').trim();
+  const ifMatch = text.match(/^if\((.+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)$/i);
+  if (ifMatch) {
+    return evaluateMiddleFormulaCondition(row, ifMatch[1]) ? ifMatch[2] : ifMatch[3];
+  }
+  const value = evaluateMiddleFormulaTerm(row, text);
+  return Number.isFinite(Number(value)) ? String(Number(Number(value).toFixed(2))) : '';
+}
+
+function evaluateMiddleFormulaCondition(row, condition) {
+  const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
+  if (!match) return false;
+  const left = Number(evaluateMiddleFormulaTerm(row, match[1]));
+  const right = Number(match[3]);
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
+  switch (match[2]) {
+    case '>': return left > right;
+    case '<': return left < right;
+    case '>=': return left >= right;
+    case '<=': return left <= right;
+    case '=':
+    case '==': return left === right;
+    default: return false;
+  }
+}
+
+function evaluateMiddleFormulaTerm(row, term) {
+  const text = String(term || '').trim();
+  const daysMatch = text.match(/^days\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i);
+  if (daysMatch) {
+    const endDate = evaluateMiddleFormulaDateArg(row, daysMatch[1]);
+    const startDate = evaluateMiddleFormulaDateArg(row, daysMatch[2]);
+    if (!endDate || !startDate) return '';
+    return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
+  }
+  return toFormulaNumber(text);
+}
+
+function evaluateMiddleFormulaDateArg(row, value) {
+  const text = String(value || '').trim();
+  if (/^today\(\)$/i.test(text)) {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const parts = tokenMatch[1].split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') return toMiddleFormulaDate(row?.[parts[1]]);
+    return null;
+  }
+  return toMiddleFormulaDate(text);
+}
+
+function toMiddleFormulaDate(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 function toFormulaNumber(value) {
@@ -3990,6 +4058,9 @@ function applyFormulaConfig() {
 }
 
 function validateFormulaExpression(expression) {
+  if (isAdvancedMiddleFormulaExpression(expression)) {
+    return validateAdvancedFormulaExpression(expression);
+  }
   const withoutTokens = expression.replace(/\{[^{}]+\}/g, '');
   if (/[^0-9+\-*/().,\s]/.test(withoutTokens)) {
     return '公式只能包含字段、数字、加减乘除和括号';
@@ -4003,6 +4074,34 @@ function validateFormulaExpression(expression) {
     }
     if (token.scope === 'current' && token.columnName === formulaConfig.columnKey) {
       return '公式字段不能引用自己';
+    }
+  }
+  return '';
+}
+
+function validateAdvancedFormulaExpression(expression) {
+  const text = String(expression || '').trim();
+  const allowedText = text
+    .replace(/\{[^{}]+\}/g, '')
+    .replace(/"[^"]*"/g, '');
+  if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/if 和简单条件';
+  }
+  if (!/\b(days|today|if)\s*\(/i.test(text)) {
+    return '公式函数格式无效';
+  }
+  const tokens = extractFormulaExpressionTokens(expression);
+  if (!tokens.length) return '公式至少需要插入一个字段';
+  const currentColumnKeys = new Set((selectedTableConfig.value?.columns || []).map(column => column.key));
+  for (const token of tokens) {
+    if (token.scope === 'current' && !currentColumnKeys.has(token.columnName)) {
+      return `本表字段不存在：${token.columnName}`;
+    }
+    if (token.scope === 'current' && token.columnName === formulaConfig.columnKey) {
+      return '公式字段不能引用自己';
+    }
+    if (token.scope === 'table') {
+      return '日期和条件公式暂时只支持本表字段';
     }
   }
   return '';

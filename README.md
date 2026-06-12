@@ -385,6 +385,8 @@ sudo apt install -y chromium-browser webp
 - 在中台点击保存后，前端当前展示的公式字段值会写回原业务表字段。
 - 后端保存时也会兜底计算缺失的公式字段值并写回原业务表，不能只依赖前端提交。
 - 公式支持本表字段四则运算，例如 `{this.sr} - {this.cb}`。
+- 公式支持日期差函数 `days(日期1, 日期2)`，返回两个日期相差天数；支持 `today()` 表示当天日期。
+- 公式支持简单条件文本 `if(条件,"是","否")`，用于“是否影响订单”等字段。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
@@ -588,6 +590,10 @@ sudo apt install -y chromium-browser webp
 | `wj` | 文件 | `json` | YES |  |
 | `clxx` | 车辆信息 | `varchar(255)` | NO |  |
 
+字段配置：
+
+- `bxhjfy`（保险合计费用）为计算字段，公式为 `{this.jqxje}+{this.syxje}`，即交强险金额 + 商业险金额。
+
 ### 成本明细表（`cw_cbmxb`）
 
 | 字段名 | 字段注释 | 类型 | 是否可空 | 默认值 |
@@ -634,6 +640,14 @@ sudo apt install -y chromium-browser webp
 | `sfyxdd` | 是否影响订单 | `varchar(255)` | NO |  |
 | `bcbz` | 补充备注 | `text` | YES |  |
 | `sfyhfyy` | 是否已恢复运营 | `enum('是','否')` | YES |  |
+
+字段配置：
+
+- `fzr`（负责人）为关联字段，选项来源为人员表 `cw_ryb.display_name`。
+- `yjxzts`（预计闲置天数）为计算字段，公式为 `days({this.yjhfsj},{this.ksrq})`。
+- `sjxzts`（实际闲置天数）为计算字段，公式为 `days({this.sjhfsj},{this.ksrq})`。
+- `jlkyts`（距离可用天数）为计算字段，公式为 `days({this.yjhfsj},today())`。
+- `sfyxdd`（是否影响订单）为计算字段，公式为 `if(days({this.yjhfsj},{this.ksrq})>0,"是","否")`。
 
 ### 车型参数表（`cw_cxcsb`）
 
