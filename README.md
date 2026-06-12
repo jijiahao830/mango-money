@@ -405,6 +405,7 @@ sudo apt install -y chromium-browser webp
 | `cw_dccbb` | `fkje` | 付款金额字段前注释为“公式计算”，公式为：用车天数 * 单价 + 其他费用 | `{this.ycts}*{this.dj}+{this.qtfy}` |
 | `cw_dccbb` | `sjzjsr` | 实际租金收入字段前注释为“公式计算”，公式为：客户用车天数 * 客户单价 | `{this.khycts}*{this.khdj}` |
 | `cw_dccbb` | `bclr` | 本次利润字段前注释为“公式计算”，公式为：客户消费总额 - 付款金额 | `{this.khxfze}-{this.fkje}` |
+| `cw_dccbb` | `yf` | 月份字段前注释为“公式计算”，企业微信公式为：付款时间为空则返回空，否则按 `yyyy年mm月` 提取付款时间 | `if(empty({this.fksj}),"",monthlabel({this.fksj}))` |
 | `cw_bxfymxb` | `hj` | 合计字段前注释为“公式计算”，公式为各费用项求和 | `{this.bgf}+{this.jy}+{this.dcf}+{this.ggjtfy}+{this.cf}+{this.zs}+{this.glf}+{this.tcf}+{this.wx}+{this.bkhdf}+{this.qt}+{this.lpf}` |
 | `cw_djfymxb` | `hjfkje` | 合计付款金额字段前注释为“公式计算”，公式为：代驾费 + 报销金额 | `{this.djf}+{this.bxje}` |
 | `cw_gkhzmxb` | `hjzj` | 合计租金字段前注释为“公式计算”，公式为：使用天数 * 租金金额 | `{this.syts}*{this.zjje}` |
