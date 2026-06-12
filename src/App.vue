@@ -1274,6 +1274,10 @@
 	          <input v-model="fieldOptionConfig.mode" type="radio" value="table" />
 	          <span>从数据表读取</span>
 	        </label>
+	        <label>
+	          <input v-model="fieldOptionConfig.mode" type="radio" value="lookup" />
+	          <span>根据数据表获取</span>
+	        </label>
 	      </div>
 
 	      <label v-if="fieldOptionConfig.mode === 'static'" class="field-option-editor">
@@ -1281,7 +1285,7 @@
 	        <textarea v-model="fieldOptionConfig.optionText" rows="10" placeholder="每行填写一个选项"></textarea>
 	      </label>
 
-	      <div v-else class="formula-builder-grid">
+	      <div v-else-if="fieldOptionConfig.mode === 'table'" class="formula-builder-grid">
 	        <label>
 	          <span>来源表</span>
 	          <select v-model="fieldOptionConfig.sourceTableName">
@@ -1305,6 +1309,91 @@
 	              :value="column.key"
 	            >
 	              {{ column.label }}（{{ column.key }}）
+	            </option>
+	          </select>
+	        </label>
+	      </div>
+
+	      <div v-else class="field-lookup-config">
+	        <div class="formula-builder-grid">
+	          <label>
+	            <span>要引用的表</span>
+	            <select v-model="fieldOptionConfig.lookupSourceTableName">
+	              <option value="">选择表</option>
+	              <option
+	                v-for="table in fieldOptionSourceTables"
+	                :key="table.tableName"
+	                :value="table.tableName"
+	              >
+	                {{ table.tableLabel || table.tableName }}
+	              </option>
+	            </select>
+	          </label>
+	          <label>
+	            <span>要引用的字段</span>
+	            <select v-model="fieldOptionConfig.lookupResultColumnName" :disabled="!fieldOptionConfig.lookupSourceTableName">
+	              <option value="">选择字段</option>
+	              <option
+	                v-for="column in fieldOptionLookupSourceColumns"
+	                :key="column.key"
+	                :value="column.key"
+	              >
+	                {{ column.label }}（{{ column.key }}）
+	              </option>
+	            </select>
+	          </label>
+	        </div>
+
+	        <div class="lookup-condition-panel">
+	          <div class="lookup-condition-header">
+	            <span>按条件查找</span>
+	            <strong>满足以下条件</strong>
+	          </div>
+	          <div class="formula-builder-grid lookup-condition-grid">
+	            <label>
+	              <span>来源表字段</span>
+	              <select v-model="fieldOptionConfig.lookupSourceMatchColumnName" :disabled="!fieldOptionConfig.lookupSourceTableName">
+	                <option value="">选择字段</option>
+	                <option
+	                  v-for="column in fieldOptionLookupSourceColumns"
+	                  :key="column.key"
+	                  :value="column.key"
+	                >
+	                  {{ column.label }}（{{ column.key }}）
+	                </option>
+	              </select>
+	            </label>
+	            <label>
+	              <span>条件</span>
+	              <select disabled>
+	                <option>等于</option>
+	              </select>
+	            </label>
+	            <label>
+	              <span>本表字段</span>
+	              <select v-model="fieldOptionConfig.lookupCurrentMatchColumnName">
+	                <option value="">选择字段</option>
+	                <option
+	                  v-for="column in fieldOptionCurrentColumns"
+	                  :key="column.key"
+	                  :value="column.key"
+	                >
+	                  {{ column.label }}（{{ column.key }}）
+	                </option>
+	              </select>
+	            </label>
+	          </div>
+	        </div>
+
+	        <label class="field-option-editor">
+	          <span>统计方式</span>
+	          <select v-model="fieldOptionConfig.lookupAggregate">
+	            <option
+	              v-for="option in fieldLookupAggregateOptions"
+	              :key="option.value"
+	              :value="option.value"
+	            >
+	              {{ option.label }}
 	            </option>
 	          </select>
 	        </label>
@@ -1703,8 +1792,28 @@ const fieldOptionConfig = reactive({
   sourceTableName: '',
   originalSourceTableName: '',
   sourceColumnName: '',
-  originalSourceColumnName: ''
+  originalSourceColumnName: '',
+  lookupSourceTableName: '',
+  originalLookupSourceTableName: '',
+  lookupResultColumnName: '',
+  originalLookupResultColumnName: '',
+  lookupSourceMatchColumnName: '',
+  originalLookupSourceMatchColumnName: '',
+  lookupCurrentMatchColumnName: '',
+  originalLookupCurrentMatchColumnName: '',
+  lookupAggregate: 'raw',
+  originalLookupAggregate: 'raw'
 });
+const fieldLookupAggregateOptions = [
+  { value: 'raw', label: '原样引用' },
+  { value: 'distinct', label: '去重引用' },
+  { value: 'sum', label: '求和' },
+  { value: 'count', label: '计数' },
+  { value: 'countDistinct', label: '去重计数' },
+  { value: 'avg', label: '平均值' },
+  { value: 'max', label: '最大值' },
+  { value: 'min', label: '最小值' }
+];
 const fieldKindMenu = reactive({
   isOpen: false,
   tableName: '',
@@ -1802,6 +1911,15 @@ const fieldOptionSourceTables = computed(() => tableConfigItems.value);
 const fieldOptionSourceColumns = computed(() => {
   const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.sourceTableName);
   return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
+});
+const fieldOptionLookupSourceColumns = computed(() => {
+  const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.lookupSourceTableName);
+  return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
+});
+const fieldOptionCurrentColumns = computed(() => {
+  const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.tableName);
+  return (table?.columns || [])
+    .filter(column => !isHiddenTableConfigColumn(column.key) && column.key !== fieldOptionConfig.columnKey);
 });
 const fieldKindMenuStyle = computed(() => ({
   left: `${fieldKindMenu.left}px`,
@@ -3115,7 +3233,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3138,8 +3256,13 @@ function evaluateMiddleFormulaValue(row, expression) {
   if (stringMatch) return stringMatch[1];
   if (parseMiddleFormulaFunctionArgs(text, 'sumif')) return '';
   if (parseMiddleFormulaFunctionArgs(text, 'countif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'countdistinctif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'avgif')) return '';
   if (parseMiddleFormulaFunctionArgs(text, 'maxif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'minif')) return '';
   if (parseMiddleFormulaFunctionArgs(text, 'listif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'lookup')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'lookupdistinct')) return '';
   const dateAddArgs = parseMiddleFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return evaluateMiddleFormulaDateAdd(row, dateAddArgs);
   const workdayAddArgs = parseMiddleFormulaFunctionArgs(text, 'workdayadd');
@@ -4093,15 +4216,26 @@ function openFieldOptionConfig(table, column) {
   fieldOptionConfig.tableLabel = table.tableLabel || table.tableName;
   fieldOptionConfig.columnKey = column.key;
   fieldOptionConfig.columnLabel = column.label || column.key;
-  fieldOptionConfig.typeLabel = isTableConfigMultiColumn(column) ? '多选字段' : '单选字段';
+  fieldOptionConfig.typeLabel = isTableConfigMultiColumn(column) ? '多选字段' : (getFieldKind(column) === 'relation' ? '关联字段' : '单选字段');
   fieldOptionConfig.optionText = options.join('\n');
   fieldOptionConfig.originalOptionText = fieldOptionConfig.optionText;
-  fieldOptionConfig.mode = column.optionConfig?.type === 'table' ? 'table' : 'static';
+  fieldOptionConfig.mode = column.optionConfig?.type === 'lookup' ? 'lookup' : (column.optionConfig?.type === 'table' ? 'table' : 'static');
   fieldOptionConfig.originalMode = fieldOptionConfig.mode;
   fieldOptionConfig.sourceTableName = column.optionConfig?.sourceTableName || '';
   fieldOptionConfig.originalSourceTableName = fieldOptionConfig.sourceTableName;
   fieldOptionConfig.sourceColumnName = column.optionConfig?.sourceColumnName || '';
   fieldOptionConfig.originalSourceColumnName = fieldOptionConfig.sourceColumnName;
+  const lookupConfig = column.optionConfig?.lookupConfig || parseLookupConfigFromExpression(column.formulaConfig?.expression);
+  fieldOptionConfig.lookupSourceTableName = lookupConfig.sourceTableName || '';
+  fieldOptionConfig.originalLookupSourceTableName = fieldOptionConfig.lookupSourceTableName;
+  fieldOptionConfig.lookupResultColumnName = lookupConfig.resultColumnName || '';
+  fieldOptionConfig.originalLookupResultColumnName = fieldOptionConfig.lookupResultColumnName;
+  fieldOptionConfig.lookupSourceMatchColumnName = lookupConfig.sourceMatchColumnName || '';
+  fieldOptionConfig.originalLookupSourceMatchColumnName = fieldOptionConfig.lookupSourceMatchColumnName;
+  fieldOptionConfig.lookupCurrentMatchColumnName = lookupConfig.currentMatchColumnName || '';
+  fieldOptionConfig.originalLookupCurrentMatchColumnName = fieldOptionConfig.lookupCurrentMatchColumnName;
+  fieldOptionConfig.lookupAggregate = lookupConfig.aggregate || 'raw';
+  fieldOptionConfig.originalLookupAggregate = fieldOptionConfig.lookupAggregate;
 }
 
 function closeFieldOptionConfig() {
@@ -4113,6 +4247,11 @@ function resetFieldOptionConfig() {
   fieldOptionConfig.mode = fieldOptionConfig.originalMode;
   fieldOptionConfig.sourceTableName = fieldOptionConfig.originalSourceTableName;
   fieldOptionConfig.sourceColumnName = fieldOptionConfig.originalSourceColumnName;
+  fieldOptionConfig.lookupSourceTableName = fieldOptionConfig.originalLookupSourceTableName;
+  fieldOptionConfig.lookupResultColumnName = fieldOptionConfig.originalLookupResultColumnName;
+  fieldOptionConfig.lookupSourceMatchColumnName = fieldOptionConfig.originalLookupSourceMatchColumnName;
+  fieldOptionConfig.lookupCurrentMatchColumnName = fieldOptionConfig.originalLookupCurrentMatchColumnName;
+  fieldOptionConfig.lookupAggregate = fieldOptionConfig.originalLookupAggregate;
 }
 
 function parseFieldOptionText(value) {
@@ -4130,6 +4269,77 @@ function parseFieldOptionText(value) {
   return result;
 }
 
+function parseLookupConfigFromExpression(expression) {
+  const text = String(expression || '').trim();
+  const functionNames = [
+    ['lookup', 'raw'],
+    ['lookupdistinct', 'distinct'],
+    ['sumif', 'sum'],
+    ['countif', 'count'],
+    ['countdistinctif', 'countDistinct'],
+    ['avgif', 'avg'],
+    ['maxif', 'max'],
+    ['minif', 'min']
+  ];
+  for (const [functionName, aggregate] of functionNames) {
+    const args = parseMiddleFormulaFunctionArgs(text, functionName);
+    if (!args || args.length < 2) continue;
+    if (aggregate === 'count') {
+      const sourceMatch = parseLookupQualifiedColumn(args[0]);
+      const currentMatch = parseLookupCurrentColumn(args[1]);
+      if (!sourceMatch || !currentMatch) continue;
+      return {
+        sourceTableName: sourceMatch.tableName,
+        sourceMatchColumnName: sourceMatch.columnName,
+        currentMatchColumnName: currentMatch,
+        resultColumnName: sourceMatch.columnName,
+        aggregate
+      };
+    }
+    if (args.length < 3) continue;
+    const sourceMatch = parseLookupQualifiedColumn(args[0]);
+    const currentMatch = parseLookupCurrentColumn(args[1]);
+    const result = parseLookupQualifiedColumn(args[args.length - 1]);
+    if (!sourceMatch || !currentMatch || !result) continue;
+    return {
+      sourceTableName: result.tableName || sourceMatch.tableName,
+      sourceMatchColumnName: sourceMatch.columnName,
+      currentMatchColumnName: currentMatch,
+      resultColumnName: result.columnName,
+      aggregate
+    };
+  }
+  return {};
+}
+
+function parseLookupQualifiedColumn(value) {
+  const parts = String(value || '').trim().split('.').map(part => part.trim()).filter(Boolean);
+  if (parts.length !== 2) return null;
+  return { tableName: parts[0], columnName: parts[1] };
+}
+
+function parseLookupCurrentColumn(value) {
+  const match = String(value || '').trim().match(/^\{this\.([a-zA-Z0-9_]+)\}$/);
+  return match ? match[1] : '';
+}
+
+function buildLookupFieldExpression(config) {
+  const sourceTableName = config.sourceTableName;
+  const sourceMatchColumnName = config.sourceMatchColumnName;
+  const currentMatchColumnName = config.currentMatchColumnName;
+  const resultColumnName = config.resultColumnName;
+  const aggregate = config.aggregate || 'raw';
+  const matchPair = `${sourceTableName}.${sourceMatchColumnName},{this.${currentMatchColumnName}}`;
+  if (aggregate === 'sum') return `sumif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'count') return `countif(${matchPair})`;
+  if (aggregate === 'countDistinct') return `countdistinctif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'avg') return `avgif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'max') return `maxif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'min') return `minif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'distinct') return `lookupdistinct(${matchPair},${sourceTableName}.${resultColumnName})`;
+  return `lookup(${matchPair},${sourceTableName}.${resultColumnName})`;
+}
+
 function applyFieldOptionConfig() {
   const table = tableConfigItems.value.find(item => item.tableName === fieldOptionConfig.tableName);
   const column = table?.columns?.find(item => item.key === fieldOptionConfig.columnKey);
@@ -4138,7 +4348,32 @@ function applyFieldOptionConfig() {
     return;
   }
 
-  if (fieldOptionConfig.mode === 'table') {
+  if (fieldOptionConfig.mode === 'lookup') {
+    const lookupConfig = {
+      sourceTableName: fieldOptionConfig.lookupSourceTableName,
+      resultColumnName: fieldOptionConfig.lookupResultColumnName,
+      sourceMatchColumnName: fieldOptionConfig.lookupSourceMatchColumnName,
+      currentMatchColumnName: fieldOptionConfig.lookupCurrentMatchColumnName,
+      aggregate: fieldOptionConfig.lookupAggregate || 'raw'
+    };
+    if (!lookupConfig.sourceTableName || !lookupConfig.resultColumnName || !lookupConfig.sourceMatchColumnName || !lookupConfig.currentMatchColumnName) {
+      tableConfigErrorText.value = '请选择引用表、引用字段、来源匹配字段和本表匹配字段';
+      return;
+    }
+    const expression = buildLookupFieldExpression(lookupConfig);
+    column.optionConfig = {
+      type: 'lookup',
+      sourceTableName: '',
+      sourceColumnName: '',
+      lookupConfig
+    };
+    column.formulaConfig = {
+      expression,
+      dependencies: extractFormulaExpressionTokens(expression),
+      isEnabled: true
+    };
+    column.fieldKind = 'relation';
+  } else if (fieldOptionConfig.mode === 'table') {
     if (!fieldOptionConfig.sourceTableName || !fieldOptionConfig.sourceColumnName) {
       tableConfigErrorText.value = '请选择来源表和来源字段';
       return;
@@ -4262,9 +4497,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/maxif/listif/dateadd/workdayadd/monthlabel/eq/max/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);

@@ -391,7 +391,8 @@ sudo apt install -y chromium-browser webp
 - 公式支持 `dateadd(日期,数量,"day/month")` 做日期加天或加月，支持 `workdayadd(日期,数量)` 计算 N 个工作日后的日期。
 - 公式支持 `monthlabel(日期)` 提取 `YYYY年MM月`。
 - 公式支持跨表条件求和 `sumif(外表.匹配字段,{this.本表字段},外表.求和字段)`；可追加多组匹配条件，例如同车牌、同月份求和。
-- 公式支持跨表条件计数、取最大值、列表聚合：`countif()`、`maxif()`、`listif()`。
+- 公式支持跨表条件计数、去重计数、平均值、最大值、最小值、列表聚合：`countif()`、`countdistinctif()`、`avgif()`、`maxif()`、`minif()`、`listif()`。
+- 公式支持跨表查找引用 `lookup(外表.匹配字段,{this.本表字段},外表.引用字段)` 和去重引用 `lookupdistinct()`，用于按本表字段匹配其他表并带出字段值。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
@@ -417,6 +418,7 @@ sudo apt install -y chromium-browser webp
 | `cw_khzdab` | `zjcjrq` | 最近成交日期：同一个客户编号下订单出车时间最大值 | `maxif(cw_ddjszb.khbh,{this.khbh},cw_ddjszb.ccsj)` |
 | `cw_khzdab` | `ddjl` | 订单记录：同一个客户编号下订单编号列表 | `listif(cw_ddjszb.khbh,{this.khbh},cw_ddjszb.ddbh)` |
 | `cw_ddjszb` | `sjxsgl` | 实际行驶公里：回车km - 出车km | `if(empty({this.hckm}),"",if(empty({this.cckm}),"",{this.hckm}-{this.cckm}))` |
+| `cw_ddjszb` | `clgs` | 车辆归属为查找引用：订单结算主表车牌匹配车型参数表车牌号，引用车型参数表来源 | `lookup(cw_cxcsb.cph,{this.cp},cw_cxcsb.ly)` |
 | `cw_ddjszb` | `ycts` | 用车天数：超时 5 小时以内按半天，5 小时以上按一天 | `if(empty({this.ccsj}),"",if(empty({this.hcsj}),"",rentaldays({this.ccsj},{this.hcsj})))` |
 | `cw_ddjszb` | `bhkmzs` | 包含km总数：用车天数 * 限制km/天 | `if(empty({this.ycts}),"",if(empty({this.xzkmtqzyy}),"",{this.ycts}*{this.xzkmtqzyy}))` |
 | `cw_ddjszb` | `cgls` | 超公里数：实际行驶公里 - 包含km总数，结果小于 0 取 0 | `if(empty({this.sjxsgl}),"",if(empty({this.bhkmzs}),"",max({this.sjxsgl}-{this.bhkmzs},0)))` |
@@ -493,14 +495,16 @@ sudo apt install -y chromium-browser webp
 
 ### 字段选项来源
 
-表格管理的字段配置支持两种选项来源：
+表格管理的字段配置支持三种选项来源：
 
 - 固定选项：直接保存在 `cw_field_option_config.options_json`。
 - 数据表读取：保存在 `cw_field_option_config.option_source_type/source_table_name/source_column_name`，中台加载时从来源表读取去重后的字段值作为下拉选项。
+- 根据数据表获取：结构化配置保存在 `cw_field_option_config.lookup_config_json`，管理员选择引用表、引用字段、匹配条件和统计方式；后端自动生成公式配置并写入 `cw_formula_field_config`，不需要管理员手写公式。统计方式包括原样引用、去重引用、求和、计数、去重计数、平均值、最大值、最小值。
 
 当前已配置：
 
 - 报销费用明细表（`cw_bxfymxb`）的报销人字段（`bxr`）从人员表（`cw_ryb`）的姓名/显示名字段（`display_name`）读取。
+- 订单结算主表（`cw_ddjszb`）的车辆归属字段（`clgs`）使用“根据数据表获取”：按订单结算主表车牌（`cp`）匹配车型参数表车牌号（`cph`），原样引用车型参数表来源（`ly`）。
 - 报销费用明细表（`cw_bxfymxb`）的合计字段（`hj`）为计算字段。
 - 报销费用明细表（`cw_bxfymxb`）的报销单字段（`bxd`）为图片字段，数据库类型为 `json`。
 

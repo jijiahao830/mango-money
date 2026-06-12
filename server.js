@@ -937,7 +937,35 @@ async function saveTableManagementConfig(payload) {
           const options = uniqueStrings(Array.isArray(rawOptions) ? rawOptions : []);
           const optionConfig = normalizeSubmittedOptionConfig(column.optionConfig);
 
-          if (optionConfig.type === 'table') {
+          if (optionConfig.type === 'lookup') {
+            validateLookupOptionConfig(optionConfig.lookupConfig, schemaTable, schemaMap, schemaColumn);
+            const lookupExpression = buildLookupExpressionFromConfig(optionConfig.lookupConfig);
+            column.formulaConfig = {
+              expression: lookupExpression,
+              dependencies: extractFormulaDependencies(lookupExpression),
+              isEnabled: true
+            };
+            await conn.execute(
+              `INSERT INTO cw_field_option_config (
+                table_name,
+                column_name,
+                options_json,
+                option_source_type,
+                source_table_name,
+                source_column_name,
+                field_kind,
+                lookup_config_json
+              ) VALUES (?, ?, NULL, 'static', '', '', ?, ?)
+              ON DUPLICATE KEY UPDATE
+                options_json = VALUES(options_json),
+                option_source_type = VALUES(option_source_type),
+                source_table_name = VALUES(source_table_name),
+                source_column_name = VALUES(source_column_name),
+                field_kind = VALUES(field_kind),
+                lookup_config_json = VALUES(lookup_config_json)`,
+              [schemaTable.tableName, schemaColumn.key, submittedFieldKind || 'relation', JSON.stringify(optionConfig.lookupConfig)]
+            );
+          } else if (optionConfig.type === 'table') {
             if (!schemaMap.has(optionConfig.sourceTableName)) {
               throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的选项来源表不存在`);
             }
@@ -960,7 +988,8 @@ async function saveTableManagementConfig(payload) {
 	                option_source_type = VALUES(option_source_type),
 	                source_table_name = VALUES(source_table_name),
 	                source_column_name = VALUES(source_column_name),
-	                field_kind = VALUES(field_kind)`,
+	                field_kind = VALUES(field_kind),
+	                lookup_config_json = NULL`,
 	              [schemaTable.tableName, schemaColumn.key, optionConfig.sourceTableName, optionConfig.sourceColumnName, submittedFieldKind]
 	            );
 	          } else if (!options.length) {
@@ -981,7 +1010,8 @@ async function saveTableManagementConfig(payload) {
 	                option_source_type = VALUES(option_source_type),
 	                source_table_name = VALUES(source_table_name),
 	                source_column_name = VALUES(source_column_name),
-	                field_kind = VALUES(field_kind)`,
+	                field_kind = VALUES(field_kind),
+	                lookup_config_json = NULL`,
 	              [schemaTable.tableName, schemaColumn.key, JSON.stringify(options), submittedFieldKind]
 	            );
 	          }
@@ -1479,6 +1509,9 @@ async function ensureFieldOptionConfigTable(conn) {
   if (!names.has('field_kind')) {
     await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN field_kind VARCHAR(20) NOT NULL DEFAULT '' COMMENT '字段类型标签' AFTER source_column_name`);
   }
+  if (!names.has('lookup_config_json')) {
+    await conn.execute(`ALTER TABLE cw_field_option_config ADD COLUMN lookup_config_json JSON NULL COMMENT '根据数据表获取配置' AFTER field_kind`);
+  }
 }
 
 async function ensureFormulaFieldConfigTable(conn) {
@@ -1614,6 +1647,16 @@ function parseJsonArray(value) {
   }
 }
 
+function parseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || 'null');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function getWecomSelectOptionsByDbField() {
   const filePath = path.join(RUNTIME_DIR, 'wecom_select_fields.json');
   const raw = await fsp.readFile(filePath, 'utf8').catch(() => '');
@@ -1648,15 +1691,18 @@ async function getConfiguredFieldOptionsByDbField(conn) {
 	      option_source_type,
 	      source_table_name,
 	      source_column_name,
-	      field_kind
+	      field_kind,
+	      lookup_config_json
 	    FROM cw_field_option_config
   `);
   const configByField = new Map();
   for (const row of rows) {
+    const lookupConfig = normalizeLookupConfig(parseJsonObject(row.lookup_config_json));
     const optionConfig = {
-      type: row.option_source_type === 'table' ? 'table' : 'static',
+      type: lookupConfig ? 'lookup' : (row.option_source_type === 'table' ? 'table' : 'static'),
       sourceTableName: row.source_table_name || '',
-      sourceColumnName: row.source_column_name || ''
+      sourceColumnName: row.source_column_name || '',
+      lookupConfig: lookupConfig || null
     };
     const options = optionConfig.type === 'table'
       ? await getTableColumnOptions(conn, optionConfig.sourceTableName, optionConfig.sourceColumnName)
@@ -1827,7 +1873,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -1986,10 +2032,20 @@ function buildFormulaSqlValue(schemaTable, value) {
   if (sumIfArgs) return buildFormulaSqlSumIf(schemaTable, sumIfArgs);
   const countIfArgs = parseFormulaFunctionArgs(text, 'countif');
   if (countIfArgs) return buildFormulaSqlCountIf(schemaTable, countIfArgs);
+  const countDistinctIfArgs = parseFormulaFunctionArgs(text, 'countdistinctif');
+  if (countDistinctIfArgs) return buildFormulaSqlCountDistinctIf(schemaTable, countDistinctIfArgs);
+  const avgIfArgs = parseFormulaFunctionArgs(text, 'avgif');
+  if (avgIfArgs) return buildFormulaSqlAvgIf(schemaTable, avgIfArgs);
   const maxIfArgs = parseFormulaFunctionArgs(text, 'maxif');
   if (maxIfArgs) return buildFormulaSqlMaxIf(schemaTable, maxIfArgs);
+  const minIfArgs = parseFormulaFunctionArgs(text, 'minif');
+  if (minIfArgs) return buildFormulaSqlMinIf(schemaTable, minIfArgs);
   const listIfArgs = parseFormulaFunctionArgs(text, 'listif');
   if (listIfArgs) return buildFormulaSqlListIf(schemaTable, listIfArgs);
+  const lookupArgs = parseFormulaFunctionArgs(text, 'lookup');
+  if (lookupArgs) return buildFormulaSqlLookup(schemaTable, lookupArgs);
+  const lookupDistinctArgs = parseFormulaFunctionArgs(text, 'lookupdistinct');
+  if (lookupDistinctArgs) return buildFormulaSqlLookupDistinct(schemaTable, lookupDistinctArgs);
   const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return buildFormulaSqlDateAdd(schemaTable, dateAddArgs);
   const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
@@ -2034,6 +2090,24 @@ function buildFormulaSqlCountIf(schemaTable, args) {
   return `(SELECT COUNT(*) FROM ${escapeIdentifier(tableName)} WHERE ${conditions.join(' AND ')})`;
 }
 
+function buildFormulaSqlCountDistinctIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('countdistinctif 参数格式应为：countdistinctif(匹配字段, 当前字段, 去重字段)，可追加多组匹配字段和当前字段');
+  }
+  const distinctColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, distinctColumn.tableName, args.slice(0, -1));
+  return `(SELECT COUNT(DISTINCT ${escapeIdentifier(distinctColumn.columnName)}) FROM ${escapeIdentifier(distinctColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlAvgIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('avgif 参数格式应为：avgif(匹配字段, 当前字段, 平均字段)，可追加多组匹配字段和当前字段');
+  }
+  const avgColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, avgColumn.tableName, args.slice(0, -1));
+  return `(SELECT AVG(CAST(${escapeIdentifier(avgColumn.columnName)} AS DECIMAL(18,2))) FROM ${escapeIdentifier(avgColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
 function buildFormulaSqlMaxIf(schemaTable, args) {
   if (args.length < 3 || args.length % 2 !== 1) {
     throw new Error('maxif 参数格式应为：maxif(匹配字段, 当前字段, 取最大字段)，可追加多组匹配字段和当前字段');
@@ -2043,6 +2117,15 @@ function buildFormulaSqlMaxIf(schemaTable, args) {
   return `(SELECT MAX(${escapeIdentifier(maxColumn.columnName)}) FROM ${escapeIdentifier(maxColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
 }
 
+function buildFormulaSqlMinIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('minif 参数格式应为：minif(匹配字段, 当前字段, 取最小字段)，可追加多组匹配字段和当前字段');
+  }
+  const minColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, minColumn.tableName, args.slice(0, -1));
+  return `(SELECT MIN(${escapeIdentifier(minColumn.columnName)}) FROM ${escapeIdentifier(minColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
 function buildFormulaSqlListIf(schemaTable, args) {
   if (args.length < 3 || args.length % 2 !== 1) {
     throw new Error('listif 参数格式应为：listif(匹配字段, 当前字段, 列表字段)，可追加多组匹配字段和当前字段');
@@ -2050,6 +2133,24 @@ function buildFormulaSqlListIf(schemaTable, args) {
   const listColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
   const conditions = buildFormulaSqlIfConditions(schemaTable, listColumn.tableName, args.slice(0, -1));
   return `(SELECT GROUP_CONCAT(${escapeIdentifier(listColumn.columnName)} ORDER BY ${escapeIdentifier(listColumn.columnName)} SEPARATOR ', ') FROM ${escapeIdentifier(listColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlLookup(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('lookup 参数格式应为：lookup(匹配字段, 当前字段, 引用字段)，可追加多组匹配字段和当前字段');
+  }
+  const resultColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, resultColumn.tableName, args.slice(0, -1));
+  return `(SELECT ${escapeIdentifier(resultColumn.columnName)} FROM ${escapeIdentifier(resultColumn.tableName)} WHERE ${conditions.join(' AND ')} ORDER BY id ASC LIMIT 1)`;
+}
+
+function buildFormulaSqlLookupDistinct(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('lookupdistinct 参数格式应为：lookupdistinct(匹配字段, 当前字段, 引用字段)，可追加多组匹配字段和当前字段');
+  }
+  const resultColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, resultColumn.tableName, args.slice(0, -1));
+  return `(SELECT GROUP_CONCAT(DISTINCT ${escapeIdentifier(resultColumn.columnName)} ORDER BY ${escapeIdentifier(resultColumn.columnName)} SEPARATOR ', ') FROM ${escapeIdentifier(resultColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
 }
 
 function buildFormulaSqlIfConditions(schemaTable, expectedTableName, args) {
@@ -2344,8 +2445,13 @@ function evaluateFormulaValue(schemaTable, expression, row) {
   if (stringMatch) return stringMatch[1];
   if (parseFormulaFunctionArgs(text, 'sumif')) return '';
   if (parseFormulaFunctionArgs(text, 'countif')) return '';
+  if (parseFormulaFunctionArgs(text, 'countdistinctif')) return '';
+  if (parseFormulaFunctionArgs(text, 'avgif')) return '';
   if (parseFormulaFunctionArgs(text, 'maxif')) return '';
+  if (parseFormulaFunctionArgs(text, 'minif')) return '';
   if (parseFormulaFunctionArgs(text, 'listif')) return '';
+  if (parseFormulaFunctionArgs(text, 'lookup')) return '';
+  if (parseFormulaFunctionArgs(text, 'lookupdistinct')) return '';
   const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return evaluateFormulaDateAdd(schemaTable, dateAddArgs, row);
   const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
@@ -2586,6 +2692,14 @@ function isConfigurableOptionColumn(column) {
 }
 
 function normalizeSubmittedOptionConfig(config) {
+  if (config?.type === 'lookup') {
+    return {
+      type: 'lookup',
+      sourceTableName: '',
+      sourceColumnName: '',
+      lookupConfig: normalizeLookupConfig(config.lookupConfig) || {}
+    };
+  }
   if (config?.type === 'table') {
     return {
       type: 'table',
@@ -2594,6 +2708,55 @@ function normalizeSubmittedOptionConfig(config) {
     };
   }
   return { type: 'static', sourceTableName: '', sourceColumnName: '' };
+}
+
+function normalizeLookupConfig(config) {
+  if (!config || typeof config !== 'object') return null;
+  const aggregate = String(config.aggregate || 'raw').trim();
+  const normalized = {
+    sourceTableName: String(config.sourceTableName || '').trim(),
+    resultColumnName: String(config.resultColumnName || '').trim(),
+    sourceMatchColumnName: String(config.sourceMatchColumnName || '').trim(),
+    currentMatchColumnName: String(config.currentMatchColumnName || '').trim(),
+    aggregate: ['raw', 'distinct', 'sum', 'count', 'countDistinct', 'avg', 'max', 'min'].includes(aggregate) ? aggregate : 'raw'
+  };
+  return Object.values(normalized).some(Boolean) ? normalized : null;
+}
+
+function validateLookupOptionConfig(config, schemaTable, schemaMap, schemaColumn) {
+  const lookupConfig = normalizeLookupConfig(config);
+  if (!lookupConfig) throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的根据数据表获取配置无效`);
+  const sourceTable = schemaMap.get(lookupConfig.sourceTableName);
+  if (!sourceTable) throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的引用表不存在`);
+  if (!sourceTable.columns.some(column => column.key === lookupConfig.resultColumnName)) {
+    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的引用字段不存在`);
+  }
+  if (!sourceTable.columns.some(column => column.key === lookupConfig.sourceMatchColumnName)) {
+    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的来源匹配字段不存在`);
+  }
+  if (!schemaTable.columns.some(column => column.key === lookupConfig.currentMatchColumnName)) {
+    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的本表匹配字段不存在`);
+  }
+  if (lookupConfig.currentMatchColumnName === schemaColumn.key) {
+    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 不能用自己作为匹配字段`);
+  }
+}
+
+function buildLookupExpressionFromConfig(config) {
+  const lookupConfig = normalizeLookupConfig(config);
+  const sourceTableName = lookupConfig.sourceTableName;
+  const sourceMatchColumnName = lookupConfig.sourceMatchColumnName;
+  const currentMatchColumnName = lookupConfig.currentMatchColumnName;
+  const resultColumnName = lookupConfig.resultColumnName;
+  const matchPair = `${sourceTableName}.${sourceMatchColumnName},{this.${currentMatchColumnName}}`;
+  if (lookupConfig.aggregate === 'sum') return `sumif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'count') return `countif(${matchPair})`;
+  if (lookupConfig.aggregate === 'countDistinct') return `countdistinctif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'avg') return `avgif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'max') return `maxif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'min') return `minif(${matchPair},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'distinct') return `lookupdistinct(${matchPair},${sourceTableName}.${resultColumnName})`;
+  return `lookup(${matchPair},${sourceTableName}.${resultColumnName})`;
 }
 
 async function saveFieldKindOnlyConfig(conn, tableName, columnName, fieldKind) {
