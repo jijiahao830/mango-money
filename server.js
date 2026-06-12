@@ -1827,7 +1827,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -1984,8 +1984,23 @@ function buildFormulaSqlValue(schemaTable, value) {
   if (stringMatch) return sqlStringLiteral(stringMatch[1]);
   const sumIfArgs = parseFormulaFunctionArgs(text, 'sumif');
   if (sumIfArgs) return buildFormulaSqlSumIf(schemaTable, sumIfArgs);
+  const countIfArgs = parseFormulaFunctionArgs(text, 'countif');
+  if (countIfArgs) return buildFormulaSqlCountIf(schemaTable, countIfArgs);
+  const maxIfArgs = parseFormulaFunctionArgs(text, 'maxif');
+  if (maxIfArgs) return buildFormulaSqlMaxIf(schemaTable, maxIfArgs);
+  const listIfArgs = parseFormulaFunctionArgs(text, 'listif');
+  if (listIfArgs) return buildFormulaSqlListIf(schemaTable, listIfArgs);
   const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return buildFormulaSqlDateAdd(schemaTable, dateAddArgs);
+  const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
+  if (workdayAddArgs) return buildFormulaSqlWorkdayAdd(schemaTable, workdayAddArgs);
+  const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
+  if (monthLabelArgs) return buildFormulaSqlMonthLabel(schemaTable, monthLabelArgs);
+  const maxArgs = parseFormulaFunctionArgs(text, 'max');
+  if (maxArgs) {
+    if (maxArgs.length < 2) throw new Error('max 至少需要两个参数');
+    return `GREATEST(${maxArgs.map(arg => buildFormulaSqlValue(schemaTable, arg)).join(', ')})`;
+  }
   if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
     return buildFormulaSqlNumericExpression(schemaTable, text);
   }
@@ -2007,6 +2022,46 @@ function buildFormulaSqlSumIf(schemaTable, args) {
     conditions.push(`${escapeIdentifier(matchColumn.columnName)} = ${buildFormulaSqlCompareArg(schemaTable, args[index + 1])}`);
   }
   return `(SELECT COALESCE(SUM(CAST(${escapeIdentifier(sumColumn.columnName)} AS DECIMAL(18,2))), 0) FROM ${escapeIdentifier(tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlCountIf(schemaTable, args) {
+  if (args.length < 2 || args.length % 2 !== 0) {
+    throw new Error('countif 参数格式应为：countif(匹配字段, 当前字段)，可追加多组匹配字段和当前字段');
+  }
+  const firstColumn = parseFormulaQualifiedColumn(args[0]);
+  const tableName = firstColumn.tableName;
+  const conditions = buildFormulaSqlIfConditions(schemaTable, tableName, args);
+  return `(SELECT COUNT(*) FROM ${escapeIdentifier(tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlMaxIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('maxif 参数格式应为：maxif(匹配字段, 当前字段, 取最大字段)，可追加多组匹配字段和当前字段');
+  }
+  const maxColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, maxColumn.tableName, args.slice(0, -1));
+  return `(SELECT MAX(${escapeIdentifier(maxColumn.columnName)}) FROM ${escapeIdentifier(maxColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlListIf(schemaTable, args) {
+  if (args.length < 3 || args.length % 2 !== 1) {
+    throw new Error('listif 参数格式应为：listif(匹配字段, 当前字段, 列表字段)，可追加多组匹配字段和当前字段');
+  }
+  const listColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
+  const conditions = buildFormulaSqlIfConditions(schemaTable, listColumn.tableName, args.slice(0, -1));
+  return `(SELECT GROUP_CONCAT(${escapeIdentifier(listColumn.columnName)} ORDER BY ${escapeIdentifier(listColumn.columnName)} SEPARATOR ', ') FROM ${escapeIdentifier(listColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
+}
+
+function buildFormulaSqlIfConditions(schemaTable, expectedTableName, args) {
+  const conditions = [];
+  for (let index = 0; index < args.length; index += 2) {
+    const matchColumn = parseFormulaQualifiedColumn(args[index]);
+    if (matchColumn.tableName !== expectedTableName) {
+      throw new Error('条件聚合函数的匹配字段和结果字段必须来自同一张表');
+    }
+    conditions.push(`${escapeIdentifier(matchColumn.columnName)} = ${buildFormulaSqlCompareArg(schemaTable, args[index + 1])}`);
+  }
+  return conditions;
 }
 
 function parseFormulaQualifiedColumn(value) {
@@ -2034,6 +2089,21 @@ function buildFormulaSqlDateAdd(schemaTable, args) {
   if (!unitMatch) throw new Error(`dateadd 单位只支持 day 或 month：${args[2]}`);
   const unit = unitMatch[1].toUpperCase();
   return `DATE_ADD(${buildFormulaSqlDateArg(schemaTable, args[0])}, INTERVAL ${Math.trunc(amount)} ${unit})`;
+}
+
+function buildFormulaSqlWorkdayAdd(schemaTable, args) {
+  if (args.length !== 2) throw new Error('workdayadd 参数格式应为：workdayadd(日期, 工作日数量)');
+  const amount = Number(String(args[1] || '').trim());
+  if (!Number.isFinite(amount) || amount < 0) throw new Error(`workdayadd 数量无效：${args[1]}`);
+  const dateSql = buildFormulaSqlDateArg(schemaTable, args[0]);
+  const normalizedStart = `(CASE WHEN WEEKDAY(${dateSql}) = 5 THEN DATE_SUB(${dateSql}, INTERVAL 1 DAY) WHEN WEEKDAY(${dateSql}) = 6 THEN DATE_SUB(${dateSql}, INTERVAL 2 DAY) ELSE ${dateSql} END)`;
+  const daysToAdd = `${Math.trunc(amount)} + 2 * FLOOR((WEEKDAY(${normalizedStart}) + ${Math.trunc(amount)}) / 5)`;
+  return `DATE_ADD(${normalizedStart}, INTERVAL (${daysToAdd}) DAY)`;
+}
+
+function buildFormulaSqlMonthLabel(schemaTable, args) {
+  if (args.length !== 1) throw new Error('monthlabel 参数格式应为：monthlabel(日期)');
+  return `DATE_FORMAT(${buildFormulaSqlDateArg(schemaTable, args[0])}, '%Y年%m月')`;
 }
 
 function buildFormulaSqlNumericExpression(schemaTable, expression) {
@@ -2086,6 +2156,14 @@ function buildFormulaSqlRawArg(schemaTable, value) {
 
 function buildFormulaSqlTerm(schemaTable, term) {
   const text = String(term || '').trim();
+  const rentalDaysArgs = parseFormulaFunctionArgs(text, 'rentaldays');
+  if (rentalDaysArgs) {
+    if (rentalDaysArgs.length !== 2) throw new Error(`公式 rentaldays 参数数量无效：${term}`);
+    const startSql = buildFormulaSqlDateArg(schemaTable, rentalDaysArgs[0]);
+    const endSql = buildFormulaSqlDateArg(schemaTable, rentalDaysArgs[1]);
+    const minutesSql = `TIMESTAMPDIFF(MINUTE, ${startSql}, ${endSql})`;
+    return `(CASE WHEN ${minutesSql} <= 0 THEN 0 ELSE FLOOR(${minutesSql} / 1440) + CASE WHEN MOD(${minutesSql}, 1440) = 0 THEN 0 WHEN MOD(${minutesSql}, 1440) <= 300 THEN 0.5 ELSE 1 END END)`;
+  }
   const daysArgs = parseFormulaFunctionArgs(text, 'days');
   if (daysArgs) {
     if (daysArgs.length !== 2) throw new Error(`公式 days 参数数量无效：${term}`);
@@ -2265,8 +2343,21 @@ function evaluateFormulaValue(schemaTable, expression, row) {
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
   if (parseFormulaFunctionArgs(text, 'sumif')) return '';
+  if (parseFormulaFunctionArgs(text, 'countif')) return '';
+  if (parseFormulaFunctionArgs(text, 'maxif')) return '';
+  if (parseFormulaFunctionArgs(text, 'listif')) return '';
   const dateAddArgs = parseFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return evaluateFormulaDateAdd(schemaTable, dateAddArgs, row);
+  const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
+  if (workdayAddArgs) return evaluateFormulaWorkdayAdd(schemaTable, workdayAddArgs, row);
+  const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
+  if (monthLabelArgs) return evaluateFormulaMonthLabel(schemaTable, monthLabelArgs, row);
+  const maxArgs = parseFormulaFunctionArgs(text, 'max');
+  if (maxArgs) {
+    const values = maxArgs.map(arg => Number(evaluateFormulaValue(schemaTable, arg, row)));
+    if (values.some(value => !Number.isFinite(value))) return '';
+    return Math.max(...values);
+  }
   if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
     return evaluateFormulaNumericExpression(schemaTable, text, row);
   }
@@ -2294,6 +2385,30 @@ function evaluateFormulaDateAdd(schemaTable, args, row) {
     result.setDate(result.getDate() + Math.trunc(amount));
   }
   return formatFormulaDate(result);
+}
+
+function evaluateFormulaWorkdayAdd(schemaTable, args, row) {
+  if (args.length !== 2) return '';
+  const date = evaluateFormulaDateArg(schemaTable, args[0], row);
+  const amount = Number(String(args[1] || '').trim());
+  if (!date || !Number.isFinite(amount) || amount < 0) return '';
+  const result = new Date(date.getTime());
+  let remaining = Math.trunc(amount);
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1);
+    const day = result.getDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return formatFormulaDate(result);
+}
+
+function evaluateFormulaMonthLabel(schemaTable, args, row) {
+  if (args.length !== 1) return '';
+  const date = evaluateFormulaDateArg(schemaTable, args[0], row);
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}年${month}月`;
 }
 
 function evaluateFormulaNumericExpression(schemaTable, expression, row) {
@@ -2341,6 +2456,18 @@ function evaluateFormulaCondition(schemaTable, condition, row) {
 
 function evaluateFormulaTerm(schemaTable, term, row) {
   const text = String(term || '').trim();
+  const rentalDaysArgs = parseFormulaFunctionArgs(text, 'rentaldays');
+  if (rentalDaysArgs) {
+    if (rentalDaysArgs.length !== 2) return '';
+    const startDate = evaluateFormulaDateTimeArg(schemaTable, rentalDaysArgs[0], row);
+    const endDate = evaluateFormulaDateTimeArg(schemaTable, rentalDaysArgs[1], row);
+    if (!startDate || !endDate) return '';
+    const minutes = Math.floor((endDate.getTime() - startDate.getTime()) / 60000);
+    if (minutes <= 0) return 0;
+    const wholeDays = Math.floor(minutes / 1440);
+    const rest = minutes % 1440;
+    return wholeDays + (rest === 0 ? 0 : rest <= 300 ? 0.5 : 1);
+  }
   const daysArgs = parseFormulaFunctionArgs(text, 'days');
   if (daysArgs) {
     if (daysArgs.length !== 2) return '';
@@ -2366,6 +2493,22 @@ function evaluateFormulaDateArg(schemaTable, value, row) {
     return toFormulaDate(row[dependency.columnName]);
   }
   return toFormulaDate(text);
+}
+
+function evaluateFormulaDateTimeArg(schemaTable, value, row) {
+  const text = String(value || '').trim();
+  if (/^today\(\)$/i.test(text)) return new Date();
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) return null;
+    const raw = row[dependency.columnName];
+    if (raw === undefined || raw === null || raw === '') return null;
+    const date = raw instanceof Date ? raw : new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function evaluateFormulaRawValue(schemaTable, value, row) {
@@ -2624,8 +2767,8 @@ function formatSelectColumn(column) {
 
 function buildMiddleTableOrderSql(tableName, columns) {
   const columnKeys = new Set(columns.map(column => column.key));
-  if (tableName === 'cw_cxcsb' && columnKeys.has('vehicle_id')) {
-    return 'ORDER BY vehicle_id + 0, vehicle_id, plate_number';
+  if (tableName === 'cw_cxcsb' && columnKeys.has('clid2')) {
+    return 'ORDER BY clid2 + 0, clid2, cph';
   }
   if (tableName === 'cw_ndlrb' && columnKeys.has('rq')) {
     return 'ORDER BY rq ASC, id ASC';

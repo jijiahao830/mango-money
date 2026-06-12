@@ -388,8 +388,10 @@ sudo apt install -y chromium-browser webp
 - 公式支持日期差函数 `days(日期1, 日期2)`，返回两个日期相差天数；支持 `today()` 表示当天日期。
 - 公式支持空值判断 `empty(字段)` 和简单条件文本 `if(条件,"是","否")`，用于“是否影响订单”等字段。
 - 公式支持 `eq(字段,"文本")` 做文本相等判断。
-- 公式支持 `dateadd(日期,数量,"day/month")` 做日期加天或加月。
+- 公式支持 `dateadd(日期,数量,"day/month")` 做日期加天或加月，支持 `workdayadd(日期,数量)` 计算 N 个工作日后的日期。
+- 公式支持 `monthlabel(日期)` 提取 `YYYY年MM月`。
 - 公式支持跨表条件求和 `sumif(外表.匹配字段,{this.本表字段},外表.求和字段)`；可追加多组匹配条件，例如同车牌、同月份求和。
+- 公式支持跨表条件计数、取最大值、列表聚合：`countif()`、`maxif()`、`listif()`。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
@@ -400,19 +402,47 @@ sudo apt install -y chromium-browser webp
 
 | 数据库表名 | 字段名 | POS 公式说明 | 系统公式 |
 | --- | --- | --- | --- |
+| `cw_dccbb` | `fkje` | 付款金额字段前注释为“公式计算”，公式为：用车天数 * 单价 + 其他费用 | `{this.ycts}*{this.dj}+{this.qtfy}` |
+| `cw_dccbb` | `sjzjsr` | 实际租金收入字段前注释为“公式计算”，公式为：客户用车天数 * 客户单价 | `{this.khycts}*{this.khdj}` |
+| `cw_dccbb` | `bclr` | 本次利润字段前注释为“公式计算”，公式为：客户消费总额 - 付款金额 | `{this.khxfze}-{this.fkje}` |
+| `cw_bxfymxb` | `hj` | 合计字段前注释为“公式计算”，公式为各费用项求和 | `{this.bgf}+{this.jy}+{this.dcf}+{this.ggjtfy}+{this.cf}+{this.zs}+{this.glf}+{this.tcf}+{this.wx}+{this.bkhdf}+{this.qt}+{this.lpf}` |
+| `cw_djfymxb` | `hjfkje` | 合计付款金额字段前注释为“公式计算”，公式为：代驾费 + 报销金额 | `{this.djf}+{this.bxje}` |
+| `cw_gkhzmxb` | `hjzj` | 合计租金字段前注释为“公式计算”，公式为：使用天数 * 租金金额 | `{this.syts}*{this.zjje}` |
+| `cw_gpsfkb` | `lr` | 利润字段前注释为“公式计算”，公式为：实收 - GPS实付款 | `{this.ss}-{this.gpssfk}` |
+| `cw_gpsfkb` | `fkrqtqny` | 付款日期-提取年月字段前注释为“公式计算” | `monthlabel({this.fkrq})` |
+| `cw_khzjlsb` | `ssk` | 实收款字段前注释为“公式计算”，公式为：收入金额 - 退款金额 | `{this.srje}-{this.tkje}` |
+| `cw_khzdab` | `ljcjje` | 累计成交金额：同一个客户编号下所有消费总额求和 | `sumif(cw_ddjszb.khbh,{this.khbh},cw_ddjszb.xfze)` |
+| `cw_khzdab` | `ljcjcs` | 累计成交次数：同一个客户编号下订单数量统计 | `countif(cw_ddjszb.khbh,{this.khbh})` |
+| `cw_khzdab` | `zjcjrq` | 最近成交日期：同一个客户编号下订单出车时间最大值 | `maxif(cw_ddjszb.khbh,{this.khbh},cw_ddjszb.ccsj)` |
+| `cw_khzdab` | `ddjl` | 订单记录：同一个客户编号下订单编号列表 | `listif(cw_ddjszb.khbh,{this.khbh},cw_ddjszb.ddbh)` |
+| `cw_ddjszb` | `sjxsgl` | 实际行驶公里：回车km - 出车km | `if(empty({this.hckm}),"",if(empty({this.cckm}),"",{this.hckm}-{this.cckm}))` |
+| `cw_ddjszb` | `ycts` | 用车天数：超时 5 小时以内按半天，5 小时以上按一天 | `if(empty({this.ccsj}),"",if(empty({this.hcsj}),"",rentaldays({this.ccsj},{this.hcsj})))` |
+| `cw_ddjszb` | `bhkmzs` | 包含km总数：用车天数 * 限制km/天 | `if(empty({this.ycts}),"",if(empty({this.xzkmtqzyy}),"",{this.ycts}*{this.xzkmtqzyy}))` |
+| `cw_ddjszb` | `cgls` | 超公里数：实际行驶公里 - 包含km总数，结果小于 0 取 0 | `if(empty({this.sjxsgl}),"",if(empty({this.bhkmzs}),"",max({this.sjxsgl}-{this.bhkmzs},0)))` |
+| `cw_ddjszb` | `glsce` | 公里数差额：实际行驶公里 - 包含km总数 | `if(empty({this.sjxsgl}),"",if(empty({this.bhkmzs}),"",{this.sjxsgl}-{this.bhkmzs}))` |
+| `cw_ddjszb` | `cglf` | 超公里费：超公里数 * 超公里单价，结果小于 0 取 0 | `if(empty({this.cgls}),"",if(empty({this.cgldj}),"",max({this.cgls}*{this.cgldj},0)))` |
+| `cw_ddjszb` | `byl` | 补油量：（出车油量 - 回车油量）* 油箱容量 / 100，结果小于 0 取 0 | `if(empty({this.ccyl}),"",if(empty({this.hcyl}),"",if(empty({this.yxrl}),"",max(({this.ccyl}-{this.hcyl})*{this.yxrl}/100,0))))` |
+| `cw_ddjszb` | `byf` | 补油费：补油量 * 今日油价 | `if(empty({this.byl}),"",if(empty({this.jryj}),"",{this.byl}*{this.jryj}))` |
+| `cw_ddjszb` | `jczj` | 基础租金：日租成交价 * 用车天数 | `if(empty({this.rzcjj}),"",if(empty({this.ycts}),"",{this.rzcjj}*{this.ycts}))` |
+| `cw_ddjszb` | `xfze` | 消费总额：基础租金 + 超公里费 + 补油费 + 其他费用 + 调整金额 | `{this.jczj}+{this.cglf}+{this.byf}+{this.qtfy}+{this.dzje}` |
+| `cw_ddjszb` | `hjsk` | 合计收款：已收租金 + 车辆押金 + 违章押金 | `{this.yszj}+{this.clyj}+{this.wzyj}` |
+| `cw_ddjszb` | `ytyjje` | 应退押金金额：车辆押金 + 已收租金 - 消费总额，结果小于 0 取 0 | `if(empty({this.clyj}),"",if(empty({this.yszj}),"",if(empty({this.xfze}),"",max({this.clyj}+{this.yszj}-{this.xfze},0))))` |
+| `cw_ddjszb` | `sywzyj` | 剩余违章押金：消费总额 - 已收租金 - 车辆押金，结果小于 0 取 0 | `if(empty({this.xfze}),"",if(empty({this.yszj}),"",if(empty({this.clyj}),"",max({this.xfze}-{this.yszj}-{this.clyj},0))))` |
+| `cw_ddjszb` | `ybje` | 应补金额：消费总额 - 合计收款，结果小于 0 取 0 | `if(empty({this.xfze}),"",if(empty({this.hjsk}),"",max({this.xfze}-{this.hjsk},0)))` |
 | `cw_bxxfjlb` | `bxhjfy` | 交强险金额 + 商业险金额 | `{this.jqxje}+{this.syxje}` |
 | `cw_clycb` | `yjxzts` | 预计恢复时间 - 开始日期；如果预计恢复时间或开始日期为空则返回空 | `if(empty({this.yjhfsj}),"",if(empty({this.ksrq}),"",days({this.yjhfsj},{this.ksrq})))` |
 | `cw_clycb` | `sjxzts` | 实际恢复时间 - 开始日期；如果实际恢复时间或开始日期为空则返回空 | `if(empty({this.sjhfsj}),"",if(empty({this.ksrq}),"",days({this.sjhfsj},{this.ksrq})))` |
 | `cw_clycb` | `jlkyts` | 预计恢复时间 - 今天；如果预计恢复时间为空则返回空 | `if(empty({this.yjhfsj}),"",days({this.yjhfsj},today()))` |
 | `cw_clycb` | `sfyxdd` | 今天是否到预计恢复时间，到了填是，没到填否；如果预计恢复时间为空则返回空 | `if(empty({this.yjhfsj}),"",if(days(today(),{this.yjhfsj})>=0,"是","否"))` |
-| `cw_gkczb` | `days_to_contract_expire` | 合作到期日 - 今天；合作到期日为空则返回空 | `if(empty({this.cooperation_expire_date}),"",days({this.cooperation_expire_date},today()))` |
-| `cw_gkczb` | `is_expire_warning` | 合作到期日 - 今天 <= 7 填是，否则填否；合作到期日为空则返回空 | `if(empty({this.cooperation_expire_date}),"",if(days({this.cooperation_expire_date},today())<=7,"是","否"))` |
-| `cw_gkczb` | `current_cycle_unpaid` | 本周期应结金额 - 本周期已结金额；本周期应结金额为空则返回空 | `if(empty({this.current_cycle_payable}),"",{this.current_cycle_payable}-{this.current_cycle_paid})` |
-| `cw_gkczb` | `next_settlement_date` | 结算周期是日结则今天 + 1，周结则今天 + 7，月结则今天 + 1 月；结算周期为空则返回空 | `if(empty({this.settlement_cycle}),"",if(eq({this.settlement_cycle},"日结"),dateadd(today(),1,"day"),if(eq({this.settlement_cycle},"周结"),dateadd(today(),7,"day"),dateadd(today(),1,"month"))))` |
+| `cw_gkczb` | `jlhtdqr` | 合作到期日 - 今天；合作到期日为空则返回空 | `if(empty({this.hzdqrq}),"",days({this.hzdqrq},today()))` |
+| `cw_gkczb` | `sfdqyj` | 合作到期日 - 今天 <= 7 填是，否则填否；合作到期日为空则返回空 | `if(empty({this.hzdqrq}),"",if(days({this.hzdqrq},today())<=7,"是","否"))` |
+| `cw_gkczb` | `bzqwjje` | 本周期应结金额 - 本周期已结金额；本周期应结金额为空则返回空 | `if(empty({this.bzqyjje}),"",{this.bzqyjje}-{this.bzqyjje2})` |
+| `cw_gkczb` | `xcjsrq` | 结算周期是日结则今天 + 1，周结则今天 + 7，月结则今天 + 1 月；结算周期为空则返回空 | `if(empty({this.jszq}),"",if(eq({this.jszq},"日结"),dateadd(today(),1,"day"),if(eq({this.jszq},"周结"),dateadd(today(),7,"day"),dateadd(today(),1,"month"))))` |
+| `cw_hcwzqkb` | `hcsjjsnggzrhrq` | 回车时间后的第 7 个工作日，不含周六、周日 | `workdayadd({this.hcsj},7)` |
 | `cw_gkhzmxb` | `syts` | 出车时间 - 回车时间；如果回车时间为空，则计算从出车时间到今天的天数 | `if(empty({this.ccsj}),"",if(empty({this.hcsj}),days(today(),{this.ccsj}),days({this.hcsj},{this.ccsj})))` |
 | `cw_gkclcblrb` | `zyccb` | 同一个车牌的所有付款金额求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.fkje)` |
 | `cw_gkclcblrb` | `dycb` | 月份中，同一个车牌的所有付款金额求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.yf,{this.yf},cw_dccbb.fkje)` |
-| `cw_gkclcblrb` | `wxfy` | 同一个车牌的所有维修费用求和 | `sumif(cw_wxcbb.plate_number,{this.cp},cw_wxcbb.payment_amount)` |
+| `cw_gkclcblrb` | `wxfy` | 同一个车牌的所有维修费用求和 | `sumif(cw_wxcbb.cp,{this.cp},cw_wxcbb.fkje)` |
 | `cw_gkclcblrb` | `pjcgfy` | 同一个车牌的所有配件采购费用求和 | `sumif(cw_pjcgb.cp,{this.cp},cw_pjcgb.cgje)` |
 | `cw_gkclcblrb` | `bc` | 同一个车牌的所有板车付款金额求和 | `sumif(cw_bcfymxb.tycp,{this.cp},cw_bcfymxb.fkje)` |
 | `cw_gkclcblrb` | `srje` | 月份中，同一个车牌的实际租金收入求和 | `sumif(cw_dccbb.cp,{this.cp},cw_dccbb.yf,{this.yf},cw_dccbb.sjzjsr)` |
@@ -423,12 +453,28 @@ sudo apt install -y chromium-browser webp
 | `cw_gkclcblrb` | `clbyczl` | 车辆月度出租率 / 365 | `{this.clydczl}/365` |
 | `cw_gkclcblrb` | `dylr` | 收入金额 - 当月成本 | `{this.srje}-{this.dycb}` |
 | `cw_jdfktzb` | `lr` | 付款金额 - 实际客户金额 | `{this.fkje}-{this.sskhje}` |
+| `cw_zyclcblrb` | `wxfy` | 同一个车牌的所有维修付款金额求和 | `sumif(cw_wxcbb.cp,{this.cp},cw_wxcbb.fkje)` |
+| `cw_zyclcblrb` | `bxfy` | 同一个车牌的所有保险合计费用求和 | `sumif(cw_bxxfjlb.cp,{this.cp},cw_bxxfjlb.bxhjfy)` |
+| `cw_zyclcblrb` | `pjcgfy` | 同一个车牌的所有采购金额求和 | `sumif(cw_pjcgb.cp,{this.cp},cw_pjcgb.cgje)` |
+| `cw_zyclcblrb` | `bc` | 同一个车牌的所有板车付款金额求和 | `sumif(cw_bcfymxb.tycp,{this.cp},cw_bcfymxb.fkje)` |
+| `cw_zyclcblrb` | `gpssfkqh` | 同一个车牌的所有 GPS 实付款求和 | `sumif(cw_gpsfkb.cp,{this.cp},cw_gpsfkb.gpssfk)` |
+| `cw_zyclcblrb` | `srje` | 同一个车牌的所有消费总额求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.xfze)` |
+| `cw_zyclcblrb` | `gclqkje` | 同一个车牌的所有应补金额求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.ybje)` |
+| `cw_zyclcblrb` | `sjczts` | 同一个车牌的所有用车天数求和 | `sumif(cw_ddjszb.cp,{this.cp},cw_ddjszb.ycts)` |
+| `cw_zyclcblrb` | `clndczl` | 实际出租天数 + 11月1日前出车天数后除以 365 | `({this.sjczts}+{this.f11y1rqccts})/365` |
+| `cw_zyclcblrb` | `lr` | 收入和售价减去车辆成本、费用、欠款和 GPS 实付款 | `({this.f11y1ryqsr}+{this.srje}+{this.sj})-({this.cj}-{this.wxfy}-{this.bxfy}-{this.pjcgfy}-{this.bc}-{this.wzclfy}-{this.gclqkje}-{this.gpssfkqh})` |
+| `cw_zyclcblrb` | `clhbzq` | 车辆成本合计 / 收入合计 | `({this.cj}+{this.wxfy}+{this.bxfy}+{this.pjcgfy}+{this.bc})/({this.srje}+{this.sj}+{this.f11y1ryqsr})` |
+| `cw_pjcgb` | `fkrqtqny` | 付款日期-提取年月；当前数据库无付款日期字段，按购买时间提取年月 | `monthlabel({this.gmsj})` |
 
 注意：
 
 - 上表公式已写入 `cw_formula_field_config`，字段类型同步标记为 `calc`。
-- `cw_gkclcblrb` 的跨表公式依赖 `sumif`，由数据库视图实时按当前行车牌/月进行聚合。
-- `cw_jdfktzb.lr` 和部分跨表求和源字段当前数据库类型存在 `date/datetime`，已按 POS 关系写入公式；结果是否准确取决于源字段数据能否正确转换为数字。
+- `cw_gkclcblrb`、`cw_zyclcblrb`、`cw_khzdab` 的跨表公式依赖 `sumif/countif/maxif/listif`，由数据库视图实时按当前行车牌、月份或客户编号进行聚合。
+- 已将 `cw_dccbb.fkje`、`cw_djfymxb.hjfkje`、`cw_gpsfkb.gpssfk`、`cw_khzjlsb.tkje`、`cw_khzjlsb.ssk`、`cw_jdfktzb.fkje`、`cw_zyclcblrb.gpssfkqh`、`cw_zyclcblrb.f11y1rqccts`、`cw_bcfymxb.fkje`、`cw_bcfymxb.skje` 修正为 `decimal(14,2)`。
+- `cw_zyclcblrb.cj`、`cw_zyclcblrb.sj`、`cw_zyclcblrb.bc` 当前存在非纯数字文本，未强制改字段类型，公式计算时按数值转换处理。
+- 订单结算主表 `cw_ddjszb` 的 14 个 POS 公式字段已写入数据库配置并通过中台接口创建视图验证。
+- 配件采购表 `cw_pjcgb` 原本缺少 `fkrqtqny` 字段，本次已新增 `varchar(100)` 字段；由于表内没有“付款日期”字段，当前按 `gmsj`（购买时间）提取年月。
+- POS 中 `cw_pjcgb.scjlid`（生成记录ID）标记为公式计算，但未写明生成规则，暂不自动配置，避免生成错误记录 ID。
 
 ### 字段类型标签
 
@@ -532,7 +578,7 @@ sudo apt install -y chromium-browser webp
 | `cw_khzdab` | 客户主档案表 | 23 |
 | `cw_khzjlsb` | 客户资金流水表 | 24 |
 | `cw_ndlrb` | 年度利润表 | 15 |
-| `cw_pjcgb` | 配件采购表 | 17 |
+| `cw_pjcgb` | 配件采购表 | 18 |
 | `cw_ryb` | 人员表 | 8 |
 | `cw_srmxb` | 收入明细表 | 13 |
 | `cw_swpzb` | 税务凭证表 | 12 |
@@ -557,8 +603,8 @@ sudo apt install -y chromium-browser webp
 | `skf` | 收款方 | `date` | YES |  |
 | `tyrq` | 托运日期 | `date` | YES |  |
 | `dd` | 地点 | `varchar(255)` | NO |  |
-| `skje` | 收款金额 | `date` | YES |  |
-| `fkje` | 付款金额 | `date` | YES |  |
+| `skje` | 收款金额 | `decimal(14,2)` | YES |  |
+| `fkje` | 付款金额 | `decimal(14,2)` | YES |  |
 | `skhbcfy` | 收客户板车费用 | `decimal(14,2)` | YES |  |
 | `lr` | 利润 | `decimal(14,2)` | YES |  |
 | `fktp` | 付款图片 | `json` | YES |  |
@@ -595,15 +641,6 @@ sudo apt install -y chromium-browser webp
 | `bxd` | 报销单 | `json` | YES |  |
 | `gl` | 关联 | `varchar(100)` | NO |  |
 
-配置说明：
-
-- `hj` 是计算字段，字段标签为 `calc`。
-- `hj` 公式为 `{this.bgf}+{this.jy}+{this.dcf}+{this.ggjtfy}+{this.cf}+{this.zs}+{this.glf}+{this.tcf}+{this.wx}+{this.bkhdf}+{this.qt}+{this.lpf}`。
-- 中台保存时，前端会提交当前展示的 `hj` 值，后端也会根据公式兜底计算并写入基础表。
-- `bxd` 是图片字段，字段标签为 `image`，数据库类型为 `json`。
-- `bxd` 存储图片数组；企业微信导入时保留图片 URL、图片宽高、企业微信图片 ID 等信息；网页上传时转换为 WebP 后保存。
-- 企业微信智能表“报销费用明细（财务）”的数据已可通过 `wecom-cli` 导入，导入时优先使用企业微信的“合计”值；如果该值为空，再按本地公式计算。
-
 ### 保险续费记录表（`cw_bxxfjlb`）
 
 | 字段名 | 字段注释 | 类型 | 是否可空 | 默认值 |
@@ -628,10 +665,6 @@ sudo apt install -y chromium-browser webp
 | `tp` | 图片 | `json` | YES |  |
 | `wj` | 文件 | `json` | YES |  |
 | `clxx` | 车辆信息 | `varchar(255)` | NO |  |
-
-字段配置：
-
-- `bxhjfy`（保险合计费用）为计算字段，公式为 `{this.jqxje}+{this.syxje}`，即交强险金额 + 商业险金额。
 
 ### 成本明细表（`cw_cbmxb`）
 
@@ -680,14 +713,6 @@ sudo apt install -y chromium-browser webp
 | `bcbz` | 补充备注 | `text` | YES |  |
 | `sfyhfyy` | 是否已恢复运营 | `enum('是','否')` | YES |  |
 
-字段配置：
-
-- `fzr`（负责人）为关联字段，选项来源为人员表 `cw_ryb.display_name`。
-- `yjxzts`（预计闲置天数）为计算字段，公式为 `days({this.yjhfsj},{this.ksrq})`。
-- `sjxzts`（实际闲置天数）为计算字段，公式为 `days({this.sjhfsj},{this.ksrq})`。
-- `jlkyts`（距离可用天数）为计算字段，公式为 `days({this.yjhfsj},today())`。
-- `sfyxdd`（是否影响订单）为计算字段，公式为 `if(empty({this.yjhfsj}),"",if(days(today(),{this.yjhfsj})>=0,"是","否"))`，等价于企业微信公式 `IF([预计恢复时间]= "","",IF(TODAY() >=[预计恢复时间],"是","否"))`。
-
 ### 车型参数表（`cw_cxcsb`）
 
 | 字段名 | 字段注释 | 类型 | 是否可空 | 默认值 |
@@ -696,54 +721,54 @@ sudo apt install -y chromium-browser webp
 | `create_time` | 创建时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `update_time` | 更新时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `status` | 状态：0停用，1启用 | `tinyint` | NO | 1 |
-| `vehicle_record_id` | 车辆id | `varchar(100)` | NO |  |
-| `vehicle_id` | 车辆ID | `varchar(100)` | NO |  |
-| `plate_number` | 车牌号 | `varchar(50)` | NO |  |
-| `model_name` | 车型名称 | `varchar(100)` | NO |  |
-| `vehicle_category` | 车辆分类 | `enum('性能车','超跑','豪华suv','豪华轿车','MPV','商务车','新能源','SUV','越野车')` | YES |  |
-| `fuel_tank_capacity_l` | 油箱容量（L） | `decimal(10,2)` | YES |  |
-| `recommended_fuel` | 推荐油号 | `enum('柴油','新能源','92','95','98')` | YES |  |
-| `daily_rent_price` | 日租单价 | `decimal(12,2)` | YES |  |
-| `over_mileage_price` | 超公里单价 | `decimal(12,2)` | YES |  |
-| `daily_mileage_limit` | 限制km/天 | `int` | YES |  |
-| `vehicle_status` | 车辆状态 | `enum('在库','出车','维修中','可调用','停运','已出售')` | YES |  |
-| `source` | 来源 | `enum('抵押','借用','同行','自有','挂靠')` | YES |  |
-| `key_check` | 钥匙核对 | `enum('在店','未在')` | YES |  |
-| `spring_festival_available` | 春节是否可用车 | `enum('是','否')` | YES |  |
-| `owner_name` | 车主姓名 | `varchar(100)` | NO |  |
-| `compulsory_insurance_expire_date` | 交强险到期日 | `date` | YES |  |
-| `compulsory_insurance_policy_photo` | 交强险保单照片 | `json` | YES |  |
-| `commercial_insurance_expire_date` | 商业险到期日 | `date` | YES |  |
-| `commercial_insurance_policy_photo` | 商业险保单照片 | `json` | YES |  |
-| `annual_inspection_expire_date` | 年审到期日 | `date` | YES |  |
-| `maintenance_cycle` | 保养周期 | `varchar(100)` | NO |  |
-| `next_maintenance_mileage` | 下次保养公里 | `int` | YES |  |
-| `purchase_price` | 购车价 | `decimal(12,2)` | YES |  |
-| `standard_cost` | 标准成本 | `decimal(12,2)` | YES |  |
-| `depreciation_cycle_months` | 折旧周期（月） | `int` | YES |  |
-| `vehicle_photos` | 车辆照片（附件/图片） | `json` | YES |  |
-| `initial_mileage` | 初始公里数 | `int` | YES |  |
-| `remark` | 备注 | `text` | YES |  |
-| `self_owned_management_group` | 自有管理群 | `varchar(255)` | NO |  |
-| `affiliated_group_management` | 挂靠群管理 | `varchar(255)` | NO |  |
-| `vehicle_order_records` | 车辆订单记录 | `text` | YES |  |
-| `vehicle_monthly_records` | 车辆包月记录 | `text` | YES |  |
-| `vehicle_abnormal_reason` | 车辆异常原因 | `text` | YES |  |
-| `vehicle_maintenance_records` | 车辆维修记录 | `text` | YES |  |
-| `affiliated_owner_settlement_records` | 挂靠车结款记录 | `text` | YES |  |
-| `insurance` | 保险 | `text` | YES |  |
-| `affiliated_contract_expire_date` | 挂靠车合同到期日 | `date` | YES |  |
-| `relation_2` | 关联 2 | `text` | YES |  |
-| `insurance_records` | 保险记录 | `text` | YES |  |
-| `vehicle_order_records_main_copy` | 车辆订单记录-订单结算主表（销售&车队长&财务）(副本) | `text` | YES |  |
-| `relation_3` | 关联 3 | `text` | YES |  |
-| `relation_4` | 关联 4 | `text` | YES |  |
-| `relation_5` | 关联 5 | `text` | YES |  |
-| `relation_6` | 关联 6 | `text` | YES |  |
-| `relation_7` | 关联 7 | `text` | YES |  |
-| `relation_8` | 关联 8 | `text` | YES |  |
-| `relation_9` | 关联 9 | `text` | YES |  |
-| `relation_10` | 关联 10 | `text` | YES |  |
+| `clid` | 车辆id | `varchar(100)` | NO |  |
+| `clid2` | 车辆ID | `varchar(100)` | NO |  |
+| `cph` | 车牌号 | `varchar(50)` | NO |  |
+| `cxmc` | 车型名称 | `varchar(100)` | NO |  |
+| `clfl` | 车辆分类 | `enum('性能车','超跑','豪华suv','豪华轿车','MPV','商务车','新能源','SUV','越野车')` | YES |  |
+| `yxrll` | 油箱容量（L） | `decimal(10,2)` | YES |  |
+| `tjyh` | 推荐油号 | `enum('柴油','新能源','92','95','98')` | YES |  |
+| `rzdj` | 日租单价 | `decimal(12,2)` | YES |  |
+| `cgldj` | 超公里单价 | `decimal(12,2)` | YES |  |
+| `xzkmt` | 限制km/天 | `int` | YES |  |
+| `clzt` | 车辆状态 | `enum('在库','出车','维修中','可调用','停运','已出售')` | YES |  |
+| `ly` | 来源 | `enum('抵押','借用','同行','自有','挂靠')` | YES |  |
+| `ychd` | 钥匙核对 | `enum('在店','未在')` | YES |  |
+| `cjsfkyc` | 春节是否可用车 | `enum('是','否')` | YES |  |
+| `czxm` | 车主姓名 | `varchar(100)` | NO |  |
+| `jqxdqr` | 交强险到期日 | `date` | YES |  |
+| `jqxbdzp` | 交强险保单照片 | `json` | YES |  |
+| `syxdqr` | 商业险到期日 | `date` | YES |  |
+| `syxbdzp` | 商业险保单照片 | `json` | YES |  |
+| `nsdqr` | 年审到期日 | `date` | YES |  |
+| `byzq` | 保养周期 | `varchar(100)` | NO |  |
+| `xcbygl` | 下次保养公里 | `int` | YES |  |
+| `gcj` | 购车价 | `decimal(12,2)` | YES |  |
+| `bzcb` | 标准成本 | `decimal(12,2)` | YES |  |
+| `zjzqy` | 折旧周期（月） | `int` | YES |  |
+| `clzpfjtp` | 车辆照片（附件/图片） | `json` | YES |  |
+| `csgls` | 初始公里数 | `int` | YES |  |
+| `bz` | 备注 | `text` | YES |  |
+| `zyglq` | 自有管理群 | `varchar(255)` | NO |  |
+| `gkqgl` | 挂靠群管理 | `varchar(255)` | NO |  |
+| `clddjl` | 车辆订单记录 | `text` | YES |  |
+| `clbyjl` | 车辆包月记录 | `text` | YES |  |
+| `clycyy` | 车辆异常原因 | `text` | YES |  |
+| `clwxjl` | 车辆维修记录 | `text` | YES |  |
+| `gkcjkjl` | 挂靠车结款记录 | `text` | YES |  |
+| `bx` | 保险 | `text` | YES |  |
+| `gkchtdqr` | 挂靠车合同到期日 | `date` | YES |  |
+| `gl2` | 关联 2 | `text` | YES |  |
+| `bxjl` | 保险记录 | `text` | YES |  |
+| `clddjlddjszbxscdccwfb` | 车辆订单记录-订单结算主表（销售&车队长&财务）(副本) | `text` | YES |  |
+| `gl3` | 关联 3 | `text` | YES |  |
+| `gl4` | 关联 4 | `text` | YES |  |
+| `gl5` | 关联 5 | `text` | YES |  |
+| `gl6` | 关联 6 | `text` | YES |  |
+| `gl7` | 关联 7 | `text` | YES |  |
+| `gl8` | 关联 8 | `text` | YES |  |
+| `gl9` | 关联 9 | `text` | YES |  |
+| `gl10` | 关联 10 | `text` | YES |  |
 
 ### 调车成本表（`cw_dccbb`）
 
@@ -763,7 +788,7 @@ sudo apt install -y chromium-browser webp
 | `dj` | 单价 | `decimal(14,2)` | YES |  |
 | `ycts` | 用车天数 | `decimal(14,2)` | YES |  |
 | `qtfy` | 其他费用 | `decimal(14,2)` | YES |  |
-| `fkje` | 付款金额 | `date` | YES |  |
+| `fkje` | 付款金额 | `decimal(14,2)` | YES |  |
 | `zd` | 账单 | `json` | YES |  |
 | `fksj` | 付款时间 | `datetime` | YES |  |
 | `fkjt` | 付款截图 | `json` | YES |  |
@@ -802,15 +827,15 @@ sudo apt install -y chromium-browser webp
 | `cxxz` | 车型选择 | `varchar(255)` | NO |  |
 | `htqk` | 合同情况 | `enum('未签署','已签署','配驾','摆展')` | YES |  |
 | `ccsj` | 出车时间 | `datetime` | YES |  |
-| `cckm` | 出车km | `datetime` | YES |  |
-| `ccyl` | 出车油量 | `datetime` | YES |  |
+| `cckm` | 出车km | `decimal(14,2)` | YES |  |
+| `ccyl` | 出车油量 | `decimal(14,2)` | YES |  |
 | `hcsj` | 回车时间 | `datetime` | YES |  |
-| `hckm` | 回车km | `datetime` | YES |  |
-| `hcyl` | 回车油量 | `datetime` | YES |  |
+| `hckm` | 回车km | `decimal(14,2)` | YES |  |
+| `hcyl` | 回车油量 | `decimal(14,2)` | YES |  |
 | `ycqk` | 验车情况 | `enum('旧伤','完好','车损')` | YES |  |
 | `jryj` | 今日油价 | `decimal(14,2)` | YES |  |
 | `sjxsgl` | 实际行驶公里 | `decimal(14,2)` | YES |  |
-| `ycts` | 用车天数 | `datetime` | YES |  |
+| `ycts` | 用车天数 | `decimal(14,2)` | YES |  |
 | `bhkmzs` | 包含km总数 | `decimal(14,2)` | YES |  |
 | `xzkmtqzyy` | 限制km/天-去重引用 | `decimal(14,2)` | YES |  |
 | `cgls` | 超公里数 | `decimal(14,2)` | YES |  |
@@ -830,7 +855,7 @@ sudo apt install -y chromium-browser webp
 | `yszj` | 已收租金 | `decimal(14,2)` | YES |  |
 | `clyj` | 车辆押金 | `decimal(14,2)` | YES |  |
 | `wzyj` | 违章押金 | `decimal(14,2)` | YES |  |
-| `hjsk` | 合计收款 | `date` | YES |  |
+| `hjsk` | 合计收款 | `decimal(14,2)` | YES |  |
 | `ytyjje` | 应退押金金额 | `decimal(14,2)` | YES |  |
 | `sywzyj` | 剩余违章押金 | `decimal(14,2)` | YES |  |
 | `ybje` | 应补金额 | `decimal(14,2)` | YES |  |
@@ -886,7 +911,7 @@ sudo apt install -y chromium-browser webp
 | `khbh` | 客户编号 | `varchar(255)` | NO |  |
 | `djf` | 代驾费 | `varchar(255)` | NO |  |
 | `bxje` | 报销金额 | `decimal(14,2)` | YES |  |
-| `hjfkje` | 合计付款金额 | `date` | YES |  |
+| `hjfkje` | 合计付款金额 | `decimal(14,2)` | YES |  |
 | `bz` | 备注 | `text` | YES |  |
 | `fktp` | 付款图片 | `json` | YES |  |
 | `ye` | 余额 | `decimal(14,2)` | YES |  |
@@ -942,53 +967,53 @@ sudo apt install -y chromium-browser webp
 | `create_time` | 创建时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `update_time` | 更新时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `status` | 状态：0停用，1启用 | `tinyint` | NO | 1 |
-| `model_name` | 车型 | `varchar(255)` | NO |  |
-| `plate_number` | 车牌 | `varchar(50)` | NO |  |
-| `affiliated_status` | 挂靠状态 | `enum('长期在店','可调用','考虑中')` | YES |  |
-| `spring_festival_available` | 春节是否可用 | `enum('是','否')` | YES |  |
-| `affiliated_group` | 挂靠群 | `varchar(255)` | NO |  |
-| `owner_code` | 车主编号（唯一） | `varchar(100)` | NO |  |
-| `owner_name` | 车主姓名 | `varchar(100)` | NO |  |
-| `owner_phone` | 车主电话 | `varchar(50)` | NO |  |
-| `backup_contact` | 备用联系人 | `varchar(255)` | NO |  |
-| `payment_account_info` | 收款账户信息 | `text` | YES |  |
-| `contract_number` | 合同编号 | `text` | YES |  |
-| `cooperation_start_date` | 合作开始日期 | `date` | YES |  |
-| `cooperation_expire_date` | 合作到期日期 | `date` | YES |  |
-| `days_to_contract_expire` | 距离合同到期日 | `text` | YES |  |
-| `is_expire_warning` | 是否到期预警 | `varchar(50)` | NO |  |
-| `contract_sign_status` | 合同签约状态 | `enum('生效','续约','终止','未签约')` | YES |  |
-| `share_mode` | 分成模式 | `enum('固定租金','固定分成','阶梯分成','保底+分成')` | YES |  |
-| `settlement_amount` | 结算金额 | `decimal(12,2)` | YES |  |
-| `share_ratio` | 分成比例 | `varchar(50)` | NO |  |
-| `settlement_cycle` | 结算周期 | `enum('日结','周结','月结')` | YES |  |
-| `deposit_responsibility_agreement` | 押金责任约定 | `text` | YES |  |
-| `handover_date` | 交车日期 | `date` | YES |  |
-| `retrieve_date` | 取回日期 | `date` | YES |  |
-| `current_location` | 当前所在位置 | `json` | YES |  |
-| `vehicle_available_status` | 车辆可用状态 | `json` | YES |  |
-| `allow_cross_city` | 是否允许跨城 | `enum('是','否')` | YES |  |
-| `allow_long_rent` | 是否允许长租 | `enum('是','否')` | YES |  |
-| `daily_min_deal_price` | 日最低成交价 | `decimal(12,2)` | YES |  |
-| `handover_photos` | 交接照片 | `json` | YES |  |
-| `forbidden_scenes` | 禁止场景 | `json` | YES |  |
-| `backup_key_in_store` | 备用钥匙是否在店 | `enum('是','否')` | YES |  |
-| `vehicle_documents_complete` | 随车证件是否齐 | `enum('是','否')` | YES |  |
-| `current_cycle_payable` | 本周期应结金额 | `decimal(12,2)` | YES |  |
-| `current_cycle_paid` | 本周期已结金额 | `decimal(12,2)` | YES |  |
-| `current_cycle_unpaid` | 本周期未结金额 | `decimal(12,2)` | YES |  |
-| `last_settlement_date` | 上次结算日期 | `date` | YES |  |
-| `next_settlement_date` | 下次结算日期 | `date` | YES |  |
-| `owner_credit_level` | 车主信用等级 | `enum('A','B','C')` | YES |  |
-| `owner_exception_count` | 车主异常次数 | `int` | YES |  |
-| `vehicle_exception_days` | 车辆异常天数 | `int` | YES |  |
-| `monthly_trip_count` | 月度出车次数 | `int` | YES |  |
-| `monthly_gmv` | 月度GMV | `decimal(12,2)` | YES |  |
-| `monthly_net_contribution` | 月度净贡献 | `decimal(12,2)` | YES |  |
-| `owner_profile` | 车主人物画像 | `json` | YES |  |
-| `special_requirements` | 特殊要求/禁忌说明 | `json` | YES |  |
-| `cost_control_notes` | 成本控制/结算注意事项 | `json` | YES |  |
-| `communication_strategy` | 沟通策略 | `json` | YES |  |
+| `cx` | 车型 | `varchar(255)` | NO |  |
+| `cp` | 车牌 | `varchar(50)` | NO |  |
+| `gkzt` | 挂靠状态 | `enum('长期在店','可调用','考虑中')` | YES |  |
+| `cjsfky` | 春节是否可用 | `enum('是','否')` | YES |  |
+| `gkq` | 挂靠群 | `varchar(255)` | NO |  |
+| `czbhwy` | 车主编号（唯一） | `varchar(100)` | NO |  |
+| `czxm` | 车主姓名 | `varchar(100)` | NO |  |
+| `czdh` | 车主电话 | `varchar(50)` | NO |  |
+| `bylxr` | 备用联系人 | `varchar(255)` | NO |  |
+| `skzhxx` | 收款账户信息 | `text` | YES |  |
+| `htbh` | 合同编号 | `text` | YES |  |
+| `hzksrq` | 合作开始日期 | `date` | YES |  |
+| `hzdqrq` | 合作到期日期 | `date` | YES |  |
+| `jlhtdqr` | 距离合同到期日 | `text` | YES |  |
+| `sfdqyj` | 是否到期预警 | `varchar(50)` | NO |  |
+| `htqyzt` | 合同签约状态 | `enum('生效','续约','终止','未签约')` | YES |  |
+| `fcms` | 分成模式 | `enum('固定租金','固定分成','阶梯分成','保底+分成')` | YES |  |
+| `jsje` | 结算金额 | `decimal(12,2)` | YES |  |
+| `fcbl` | 分成比例 | `varchar(50)` | NO |  |
+| `jszq` | 结算周期 | `enum('日结','周结','月结')` | YES |  |
+| `yjzryd` | 押金责任约定 | `text` | YES |  |
+| `jcrq` | 交车日期 | `date` | YES |  |
+| `qhrq` | 取回日期 | `date` | YES |  |
+| `dqszwz` | 当前所在位置 | `json` | YES |  |
+| `clkyzt` | 车辆可用状态 | `json` | YES |  |
+| `sfyxkc` | 是否允许跨城 | `enum('是','否')` | YES |  |
+| `sfyxcz` | 是否允许长租 | `enum('是','否')` | YES |  |
+| `rzdcjj` | 日最低成交价 | `decimal(12,2)` | YES |  |
+| `jjzp` | 交接照片 | `json` | YES |  |
+| `jzcj` | 禁止场景 | `json` | YES |  |
+| `byycsfzd` | 备用钥匙是否在店 | `enum('是','否')` | YES |  |
+| `sczjsfq` | 随车证件是否齐 | `enum('是','否')` | YES |  |
+| `bzqyjje` | 本周期应结金额 | `decimal(12,2)` | YES |  |
+| `bzqyjje2` | 本周期已结金额 | `decimal(12,2)` | YES |  |
+| `bzqwjje` | 本周期未结金额 | `decimal(12,2)` | YES |  |
+| `scjsrq` | 上次结算日期 | `date` | YES |  |
+| `xcjsrq` | 下次结算日期 | `date` | YES |  |
+| `czxydj` | 车主信用等级 | `enum('A','B','C')` | YES |  |
+| `czyccs` | 车主异常次数 | `int` | YES |  |
+| `clycts` | 车辆异常天数 | `int` | YES |  |
+| `ydcccs` | 月度出车次数 | `int` | YES |  |
+| `ydgmv` | 月度GMV | `decimal(12,2)` | YES |  |
+| `ydjgx` | 月度净贡献 | `decimal(12,2)` | YES |  |
+| `czrwhx` | 车主人物画像 | `json` | YES |  |
+| `tsyqjjsm` | 特殊要求/禁忌说明 | `json` | YES |  |
+| `cbkzjszysx` | 成本控制/结算注意事项 | `json` | YES |  |
+| `gtcl` | 沟通策略 | `json` | YES |  |
 
 ### 挂靠合作明细表（`cw_gkhzmxb`）
 
@@ -999,7 +1024,7 @@ sudo apt install -y chromium-browser webp
 | `update_time` | 更新时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `status` | 状态：0停用，1启用 | `tinyint` | NO | 1 |
 | `xh` | 序号 | `varchar(255)` | NO |  |
-| `customer_id` | 客户编号 | `varchar(255)` | NO |  |
+| `khbh` | 客户编号 | `varchar(255)` | NO |  |
 | `clxh` | 车辆型号 | `varchar(255)` | NO |  |
 | `cphm` | 车牌号码 | `varchar(255)` | NO |  |
 | `ccsj` | 出车时间 | `datetime` | YES |  |
@@ -1032,7 +1057,7 @@ sudo apt install -y chromium-browser webp
 | `clly` | 车辆来源 | `varchar(255)` | NO |  |
 | `clgpssbxh` | 车辆GPS 设备序号 | `varchar(255)` | NO |  |
 | `pt` | 平台 | `json` | YES |  |
-| `gpssfk` | GPS实付款 | `date` | YES |  |
+| `gpssfk` | GPS实付款 | `decimal(14,2)` | YES |  |
 | `fklx` | 付款类型 | `json` | YES |  |
 | `fkrq` | 付款日期 | `date` | YES |  |
 | `ss` | 实收 | `varchar(255)` | NO |  |
@@ -1094,7 +1119,7 @@ sudo apt install -y chromium-browser webp
 | `khbh` | 客户编号 | `varchar(255)` | NO |  |
 | `khq` | 客户群 | `varchar(255)` | NO |  |
 | `fksj` | 付款时间 | `datetime` | YES |  |
-| `fkje` | 付款金额 | `date` | YES |  |
+| `fkje` | 付款金额 | `decimal(14,2)` | YES |  |
 | `fkpzzd` | 付款凭证/账单 | `json` | YES |  |
 | `sskhje` | 实收客户金额 | `decimal(14,2)` | YES |  |
 | `skpz` | 收款凭证 | `json` | YES |  |
@@ -1108,25 +1133,25 @@ sudo apt install -y chromium-browser webp
 | `create_time` | 创建时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `update_time` | 更新时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `status` | 状态：0停用，1启用 | `tinyint` | NO | 1 |
-| `customer_id` | 客户编号 | `varchar(100)` | NO |  |
-| `customer_name` | 姓名 | `varchar(100)` | NO |  |
-| `phone` | 电话 | `varchar(50)` | NO |  |
-| `customer_group` | 客户群 | `varchar(255)` | NO |  |
-| `customer_type` | 客户类型 | `varchar(255)` | YES |  |
-| `member_level` | 会员等级 | `enum('金芒果','青芒果','芒果派')` | YES |  |
-| `source` | 来源 | `enum('抖音','自然','到店','同行','转介绍','龙哥拉群','坤哥拉群')` | YES |  |
-| `responsible_sales` | 负责销售 | `varchar(100)` | NO |  |
-| `first_reception_time` | 首次接待时间 | `datetime` | YES |  |
-| `latest_follow_up_date` | 最近跟进日期 | `date` | YES |  |
-| `next_follow_up_date` | 下次跟进日期 | `date` | YES |  |
-| `accumulated_deal_amount` | 累计成交金额 | `decimal(12,2)` | YES |  |
-| `accumulated_deal_count` | 累计成交次数 | `int` | YES |  |
-| `latest_deal_date` | 最近成交日期 | `text` | YES |  |
-| `order_records` | 订单记录 | `text` | YES |  |
-| `points_balance` | 积分余额 | `decimal(12,2)` | YES |  |
-| `car_use_records` | 用车记录 | `text` | YES |  |
+| `khbh` | 客户编号 | `varchar(100)` | NO |  |
+| `xm` | 姓名 | `varchar(100)` | NO |  |
+| `dh` | 电话 | `varchar(50)` | NO |  |
+| `khq` | 客户群 | `varchar(255)` | NO |  |
+| `khlx` | 客户类型 | `varchar(255)` | YES |  |
+| `hydj` | 会员等级 | `enum('金芒果','青芒果','芒果派')` | YES |  |
+| `ly` | 来源 | `enum('抖音','自然','到店','同行','转介绍','龙哥拉群','坤哥拉群')` | YES |  |
+| `fzxs` | 负责销售 | `varchar(100)` | NO |  |
+| `scjdsj` | 首次接待时间 | `datetime` | YES |  |
+| `zjgjrq` | 最近跟进日期 | `date` | YES |  |
+| `xcgjrq` | 下次跟进日期 | `date` | YES |  |
+| `ljcjje` | 累计成交金额 | `decimal(12,2)` | YES |  |
+| `ljcjcs` | 累计成交次数 | `int` | YES |  |
+| `zjcjrq` | 最近成交日期 | `text` | YES |  |
+| `ddjl` | 订单记录 | `text` | YES |  |
+| `jfye` | 积分余额 | `decimal(12,2)` | YES |  |
+| `ycjl` | 用车记录 | `text` | YES |  |
 | `relation` | 关联 | `text` | YES |  |
-| `relation_1` | 关联 1 | `text` | YES |  |
+| `gl1` | 关联 1 | `text` | YES |  |
 
 ### 客户资金流水表（`cw_khzjlsb`）
 
@@ -1148,10 +1173,10 @@ sudo apt install -y chromium-browser webp
 | `skjt` | 收款截图 | `json` | YES |  |
 | `fkrq` | 付款日期 | `date` | YES |  |
 | `tklx` | 退款类型 | `enum('车辆押金','违章押金','其他','转到下次用车')` | YES |  |
-| `tkje` | 退款金额 | `date` | YES |  |
+| `tkje` | 退款金额 | `decimal(14,2)` | YES |  |
 | `tkqd` | 退款渠道 | `enum('销售微信','招商银行','收钱吧','财务微信','现金','富滇银行（对公户）','工商银行卡','LS00265')` | YES |  |
 | `tkjt` | 退款截图 | `json` | YES |  |
-| `ssk` | 实收款 | `date` | YES |  |
+| `ssk` | 实收款 | `decimal(14,2)` | YES |  |
 | `khqk` | 客户欠款 | `decimal(14,2)` | YES |  |
 | `bz` | 备注 | `text` | YES |  |
 | `gl` | 关联 | `text` | YES |  |
@@ -1192,6 +1217,7 @@ sudo apt install -y chromium-browser webp
 | `gmqd` | 购买渠道 | `date` | YES |  |
 | `cgje` | 采购金额 | `decimal(14,2)` | YES |  |
 | `gmsj` | 购买时间 | `datetime` | YES |  |
+| `fkrqtqny` | 付款日期-提取年月 | `varchar(100)` | YES |  |
 | `zbq` | 质保期 | `varchar(255)` | NO |  |
 | `cx` | 车型 | `varchar(255)` | NO |  |
 | `cp` | 车牌 | `varchar(255)` | NO |  |
@@ -1289,19 +1315,19 @@ sudo apt install -y chromium-browser webp
 | `create_time` | 创建时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `update_time` | 更新时间 | `datetime` | NO | CURRENT_TIMESTAMP |
 | `status` | 状态：0停用，1启用 | `tinyint` | NO | 1 |
-| `vehicle_info` | 车辆信息 | `varchar(255)` | NO |  |
-| `plate_number` | 车牌 | `varchar(50)` | NO |  |
-| `maintenance_item` | 维修/保养项目 | `varchar(255)` | NO |  |
-| `has_replaced_parts` | 是否有更换配件 | `enum('否','是')` | YES |  |
-| `replaced_parts` | 更换配件 | `text` | YES |  |
-| `repair_sent_time` | 送修时间 | `datetime` | YES |  |
-| `repair_shop_name` | 修理厂名字 | `varchar(255)` | NO |  |
-| `payment_date` | 付款日期 | `date` | YES |  |
-| `payment_month` | 付款日期-提取年月 | `varchar(20)` | NO |  |
-| `payment_amount` | 付款金额 | `decimal(12,2)` | YES |  |
-| `repair_shop_bill` | 修理厂维修清单 | `json` | YES |  |
-| `payment_screenshot` | 付款截图 | `json` | YES |  |
-| `payment_application` | 付款申请 | `text` | YES |  |
+| `clxx` | 车辆信息 | `varchar(255)` | NO |  |
+| `cp` | 车牌 | `varchar(50)` | NO |  |
+| `wxbyxm` | 维修/保养项目 | `varchar(255)` | NO |  |
+| `sfyghpj` | 是否有更换配件 | `enum('否','是')` | YES |  |
+| `ghpj` | 更换配件 | `text` | YES |  |
+| `sxsj` | 送修时间 | `datetime` | YES |  |
+| `xlcmz` | 修理厂名字 | `varchar(255)` | NO |  |
+| `fkrq` | 付款日期 | `date` | YES |  |
+| `fkrqtqny` | 付款日期-提取年月 | `varchar(20)` | NO |  |
+| `fkje` | 付款金额 | `decimal(12,2)` | YES |  |
+| `xlcwxqd` | 修理厂维修清单 | `json` | YES |  |
+| `fkjt` | 付款截图 | `json` | YES |  |
+| `fksq` | 付款申请 | `text` | YES |  |
 
 ### 业务员押金流水表（`cw_ywyyjlsb`）
 
@@ -1354,10 +1380,10 @@ sudo apt install -y chromium-browser webp
 | `bxfy` | 保险费用 | `decimal(14,2)` | YES |  |
 | `pjcgfy` | 配件采购费用 | `decimal(14,2)` | YES |  |
 | `bc` | 板车 | `varchar(255)` | NO |  |
-| `gpssfkqh` | GPS实付款-求和 | `date` | YES |  |
+| `gpssfkqh` | GPS实付款-求和 | `decimal(14,2)` | YES |  |
 | `wzclfy` | 违章处理费用 | `decimal(14,2)` | YES |  |
 | `f11y1ryqsr` | 11月1日以前收入 | `decimal(14,2)` | YES |  |
-| `f11y1rqccts` | 11月1日前出车天数 | `date` | YES |  |
+| `f11y1rqccts` | 11月1日前出车天数 | `decimal(14,2)` | YES |  |
 | `ywsj` | 以往数据 | `varchar(255)` | NO |  |
 | `srje` | 收入金额 | `decimal(14,2)` | YES |  |
 | `gclqkje` | 该车辆欠款金额 | `decimal(14,2)` | YES |  |

@@ -1877,16 +1877,16 @@ const middleMultiFilterButtonText = computed(() => {
 const middleDashboardCards = computed(() => {
   const rows = selectedMiddleTable.value?.rows || [];
   const countBy = (key, value) => rows.filter(row => row[key] === value).length;
-  const validRentRows = rows.filter(row => Number(row.daily_rent_price));
-  const totalDailyRent = validRentRows.reduce((sum, row) => sum + Number(row.daily_rent_price || 0), 0);
+  const validRentRows = rows.filter(row => Number(row.rzdj));
+  const totalDailyRent = validRentRows.reduce((sum, row) => sum + Number(row.rzdj || 0), 0);
   const averageDailyRent = validRentRows.length ? Math.round(totalDailyRent / validRentRows.length) : 0;
 
   return [
     { key: 'total', label: '车辆总数', value: rows.length, detail: '车型参数表记录' },
-    { key: 'inStock', label: '在库车辆', value: countBy('vehicle_status', '在库'), detail: '可关注可用车辆' },
-    { key: 'out', label: '出车车辆', value: countBy('vehicle_status', '出车'), detail: '当前业务占用' },
-    { key: 'maintenance', label: '维修/备用', value: countBy('vehicle_status', '维修中') + countBy('vehicle_status', '备用/不上架'), detail: '暂不正常上架' },
-    { key: 'partner', label: '同行/挂靠', value: countBy('source', '同行') + countBy('source', '挂靠'), detail: '合作车辆来源' },
+    { key: 'inStock', label: '在库车辆', value: countBy('clzt', '在库'), detail: '可关注可用车辆' },
+    { key: 'out', label: '出车车辆', value: countBy('clzt', '出车'), detail: '当前业务占用' },
+    { key: 'maintenance', label: '维修/备用', value: countBy('clzt', '维修中') + countBy('clzt', '备用/不上架'), detail: '暂不正常上架' },
+    { key: 'partner', label: '同行/挂靠', value: countBy('ly', '同行') + countBy('ly', '挂靠'), detail: '合作车辆来源' },
     { key: 'avgRent', label: '平均日租', value: averageDailyRent ? `¥${averageDailyRent.toLocaleString('zh-CN')}` : '-', detail: '按已填日租计算' }
   ];
 });
@@ -2780,7 +2780,7 @@ async function removeMiddleRow() {
     || fallbackRow;
   if (!row) return;
 
-  const label = row.model_name || row.plate_number || row.order_id || row.username || getMiddleRowRenderKey(row);
+  const label = row.cxmc || row.cph || row.cx || row.cp || row.order_id || row.username || getMiddleRowRenderKey(row);
   const confirmed = await openConfirmDialog({
     title: '删除这一行',
     message: '确认删除当前选中的这一行吗？',
@@ -3115,7 +3115,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3137,8 +3137,21 @@ function evaluateMiddleFormulaValue(row, expression) {
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
   if (parseMiddleFormulaFunctionArgs(text, 'sumif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'countif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'maxif')) return '';
+  if (parseMiddleFormulaFunctionArgs(text, 'listif')) return '';
   const dateAddArgs = parseMiddleFormulaFunctionArgs(text, 'dateadd');
   if (dateAddArgs) return evaluateMiddleFormulaDateAdd(row, dateAddArgs);
+  const workdayAddArgs = parseMiddleFormulaFunctionArgs(text, 'workdayadd');
+  if (workdayAddArgs) return evaluateMiddleFormulaWorkdayAdd(row, workdayAddArgs);
+  const monthLabelArgs = parseMiddleFormulaFunctionArgs(text, 'monthlabel');
+  if (monthLabelArgs) return evaluateMiddleFormulaMonthLabel(row, monthLabelArgs);
+  const maxArgs = parseMiddleFormulaFunctionArgs(text, 'max');
+  if (maxArgs) {
+    const values = maxArgs.map(arg => Number(evaluateMiddleFormulaValue(row, arg)));
+    if (values.some(value => !Number.isFinite(value))) return '';
+    return Math.max(...values);
+  }
   if (/[+\-*/]/.test(text) && /\{[^{}]+\}/.test(text)) {
     return evaluateMiddleFormulaNumericExpression(row, text);
   }
@@ -3166,6 +3179,30 @@ function evaluateMiddleFormulaDateAdd(row, args) {
     result.setDate(result.getDate() + Math.trunc(amount));
   }
   return formatMiddleFormulaDate(result);
+}
+
+function evaluateMiddleFormulaWorkdayAdd(row, args) {
+  if (args.length !== 2) return '';
+  const date = evaluateMiddleFormulaDateArg(row, args[0]);
+  const amount = Number(String(args[1] || '').trim());
+  if (!date || !Number.isFinite(amount) || amount < 0) return '';
+  const result = new Date(date.getTime());
+  let remaining = Math.trunc(amount);
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1);
+    const day = result.getDay();
+    if (day !== 0 && day !== 6) remaining -= 1;
+  }
+  return formatMiddleFormulaDate(result);
+}
+
+function evaluateMiddleFormulaMonthLabel(row, args) {
+  if (args.length !== 1) return '';
+  const date = evaluateMiddleFormulaDateArg(row, args[0]);
+  if (!date) return '';
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}年${month}月`;
 }
 
 function evaluateMiddleFormulaNumericExpression(row, expression) {
@@ -3212,6 +3249,18 @@ function evaluateMiddleFormulaCondition(row, condition) {
 
 function evaluateMiddleFormulaTerm(row, term) {
   const text = String(term || '').trim();
+  const rentalDaysArgs = parseMiddleFormulaFunctionArgs(text, 'rentaldays');
+  if (rentalDaysArgs) {
+    if (rentalDaysArgs.length !== 2) return '';
+    const startDate = evaluateMiddleFormulaDateTimeArg(row, rentalDaysArgs[0]);
+    const endDate = evaluateMiddleFormulaDateTimeArg(row, rentalDaysArgs[1]);
+    if (!startDate || !endDate) return '';
+    const minutes = Math.floor((endDate.getTime() - startDate.getTime()) / 60000);
+    if (minutes <= 0) return 0;
+    const wholeDays = Math.floor(minutes / 1440);
+    const rest = minutes % 1440;
+    return wholeDays + (rest === 0 ? 0 : rest <= 300 ? 0.5 : 1);
+  }
   const daysArgs = parseMiddleFormulaFunctionArgs(text, 'days');
   if (daysArgs) {
     if (daysArgs.length !== 2) return '';
@@ -3236,6 +3285,24 @@ function evaluateMiddleFormulaDateArg(row, value) {
     return null;
   }
   return toMiddleFormulaDate(text);
+}
+
+function evaluateMiddleFormulaDateTimeArg(row, value) {
+  const text = String(value || '').trim();
+  if (/^today\(\)$/i.test(text)) return new Date();
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const parts = tokenMatch[1].split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') {
+      const raw = row?.[parts[1]];
+      if (raw === undefined || raw === null || raw === '') return null;
+      const date = raw instanceof Date ? raw : new Date(raw);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    return null;
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function evaluateMiddleFormulaRawValue(row, value) {
@@ -3394,7 +3461,7 @@ function middleTagClass(key, value) {
 
 function formatMiddleValue(key, value) {
   if (value === null || value === undefined || value === '') return '';
-  if (['daily_rent_price', 'over_mileage_price', 'purchase_price', 'standard_cost'].includes(key)) {
+  if (['rzdj', 'cgldj', 'gcj', 'bzcb'].includes(key)) {
     return `¥${Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
   }
   return String(value);
@@ -4195,9 +4262,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/dateadd/eq 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/maxif/listif/dateadd/workdayadd/monthlabel/eq/max/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|empty|sumif|dateadd|eq)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|empty|sumif|countif|maxif|listif|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);
@@ -4209,9 +4276,6 @@ function validateAdvancedFormulaExpression(expression) {
     }
     if (token.scope === 'current' && token.columnName === formulaConfig.columnKey) {
       return '公式字段不能引用自己';
-    }
-    if (token.scope === 'table') {
-      return '日期和条件公式暂时只支持本表字段';
     }
   }
   return '';
