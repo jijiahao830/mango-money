@@ -386,7 +386,7 @@ sudo apt install -y chromium-browser webp
 - 后端保存时也会兜底计算缺失的公式字段值并写回原业务表，不能只依赖前端提交。
 - 公式支持本表字段四则运算，例如 `{this.sr} - {this.cb}`。
 - 公式支持日期差函数 `days(日期1, 日期2)`，返回两个日期相差天数；支持 `today()` 表示当天日期。
-- 公式支持简单条件文本 `if(条件,"是","否")`，用于“是否影响订单”等字段。
+- 公式支持空值判断 `empty(字段)` 和简单条件文本 `if(条件,"是","否")`，用于“是否影响订单”等字段。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
@@ -647,7 +647,7 @@ sudo apt install -y chromium-browser webp
 - `yjxzts`（预计闲置天数）为计算字段，公式为 `days({this.yjhfsj},{this.ksrq})`。
 - `sjxzts`（实际闲置天数）为计算字段，公式为 `days({this.sjhfsj},{this.ksrq})`。
 - `jlkyts`（距离可用天数）为计算字段，公式为 `days({this.yjhfsj},today())`。
-- `sfyxdd`（是否影响订单）为计算字段，公式为 `if(days({this.yjhfsj},{this.ksrq})>0,"是","否")`。
+- `sfyxdd`（是否影响订单）为计算字段，公式为 `if(empty({this.yjhfsj}),"",if(days(today(),{this.yjhfsj})>=0,"是","否"))`，等价于企业微信公式 `IF([预计恢复时间]= "","",IF(TODAY() >=[预计恢复时间],"是","否"))`。
 
 ### 车型参数表（`cw_cxcsb`）
 

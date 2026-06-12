@@ -1827,7 +1827,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -1970,15 +1970,28 @@ function buildFormulaSqlExpression(schemaTable, expression) {
 }
 
 function buildAdvancedFormulaSqlExpression(schemaTable, expression) {
-  const text = String(expression || '').trim();
-  const ifMatch = text.match(/^if\((.+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)$/i);
-  if (ifMatch) {
-    return `IF(${buildFormulaSqlCondition(schemaTable, ifMatch[1])}, ${sqlStringLiteral(ifMatch[2])}, ${sqlStringLiteral(ifMatch[3])})`;
+  return buildFormulaSqlValue(schemaTable, expression);
+}
+
+function buildFormulaSqlValue(schemaTable, value) {
+  const text = String(value || '').trim();
+  const ifArgs = parseFormulaFunctionArgs(text, 'if');
+  if (ifArgs) {
+    if (ifArgs.length !== 3) throw new Error(`公式 if 参数数量无效：${value}`);
+    return `IF(${buildFormulaSqlCondition(schemaTable, ifArgs[0])}, ${buildFormulaSqlValue(schemaTable, ifArgs[1])}, ${buildFormulaSqlValue(schemaTable, ifArgs[2])})`;
   }
+  const stringMatch = text.match(/^"([^"]*)"$/);
+  if (stringMatch) return sqlStringLiteral(stringMatch[1]);
   return buildFormulaSqlTerm(schemaTable, text);
 }
 
 function buildFormulaSqlCondition(schemaTable, condition) {
+  const emptyArgs = parseFormulaFunctionArgs(condition, 'empty');
+  if (emptyArgs) {
+    if (emptyArgs.length !== 1) throw new Error(`公式 empty 参数数量无效：${condition}`);
+    const valueSql = buildFormulaSqlDateArg(schemaTable, emptyArgs[0]);
+    return `(${valueSql} IS NULL OR CAST(${valueSql} AS CHAR) = '')`;
+  }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) throw new Error(`公式条件格式无效：${condition}`);
   const operator = match[2] === '==' ? '=' : match[2];
@@ -1987,9 +2000,10 @@ function buildFormulaSqlCondition(schemaTable, condition) {
 
 function buildFormulaSqlTerm(schemaTable, term) {
   const text = String(term || '').trim();
-  const daysMatch = text.match(/^days\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i);
-  if (daysMatch) {
-    return `DATEDIFF(${buildFormulaSqlDateArg(schemaTable, daysMatch[1])}, ${buildFormulaSqlDateArg(schemaTable, daysMatch[2])})`;
+  const daysArgs = parseFormulaFunctionArgs(text, 'days');
+  if (daysArgs) {
+    if (daysArgs.length !== 2) throw new Error(`公式 days 参数数量无效：${term}`);
+    return `DATEDIFF(${buildFormulaSqlDateArg(schemaTable, daysArgs[0])}, ${buildFormulaSqlDateArg(schemaTable, daysArgs[1])})`;
   }
   return buildFormulaSqlDateArg(schemaTable, text);
 }
@@ -2011,6 +2025,38 @@ function buildFormulaSqlDateArg(schemaTable, value) {
 
 function sqlStringLiteral(value) {
   return `'${String(value || '').replace(/'/g, "''")}'`;
+}
+
+function parseFormulaFunctionArgs(expression, functionName) {
+  const text = String(expression || '').trim();
+  const prefix = `${functionName}(`;
+  if (!text.toLowerCase().startsWith(prefix) || !text.endsWith(')')) return null;
+  return splitFormulaArguments(text.slice(prefix.length, -1));
+}
+
+function splitFormulaArguments(source) {
+  const args = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '"') {
+      inString = !inString;
+      current += char;
+      continue;
+    }
+    if (!inString && char === '(') depth += 1;
+    if (!inString && char === ')') depth -= 1;
+    if (!inString && depth === 0 && char === ',') {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim() || source.trim()) args.push(current.trim());
+  return args;
 }
 
 function buildFormulaAggregateSql(dependency) {
@@ -2115,16 +2161,32 @@ function evaluateCurrentRowFormula(schemaTable, expression, row) {
 }
 
 function evaluateAdvancedFormulaExpression(schemaTable, expression, row) {
+  const value = evaluateFormulaValue(schemaTable, expression, row);
+  if (value === '') return '';
+  if (Number.isFinite(Number(value))) return Number(Number(value).toFixed(2));
+  return String(value);
+}
+
+function evaluateFormulaValue(schemaTable, expression, row) {
   const text = String(expression || '').trim();
-  const ifMatch = text.match(/^if\((.+),\s*"([^"]*)"\s*,\s*"([^"]*)"\s*\)$/i);
-  if (ifMatch) {
-    return evaluateFormulaCondition(schemaTable, ifMatch[1], row) ? ifMatch[2] : ifMatch[3];
+  const ifArgs = parseFormulaFunctionArgs(text, 'if');
+  if (ifArgs) {
+    if (ifArgs.length !== 3) return '';
+    return evaluateFormulaCondition(schemaTable, ifArgs[0], row)
+      ? evaluateFormulaValue(schemaTable, ifArgs[1], row)
+      : evaluateFormulaValue(schemaTable, ifArgs[2], row);
   }
-  const value = evaluateFormulaTerm(schemaTable, text, row);
-  return Number.isFinite(Number(value)) ? Number(Number(value).toFixed(2)) : '';
+  const stringMatch = text.match(/^"([^"]*)"$/);
+  if (stringMatch) return stringMatch[1];
+  return evaluateFormulaTerm(schemaTable, text, row);
 }
 
 function evaluateFormulaCondition(schemaTable, condition, row) {
+  const emptyArgs = parseFormulaFunctionArgs(condition, 'empty');
+  if (emptyArgs) {
+    if (emptyArgs.length !== 1) return false;
+    return evaluateFormulaRawValue(schemaTable, emptyArgs[0], row) === '';
+  }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) return false;
   const left = Number(evaluateFormulaTerm(schemaTable, match[1], row));
@@ -2143,10 +2205,11 @@ function evaluateFormulaCondition(schemaTable, condition, row) {
 
 function evaluateFormulaTerm(schemaTable, term, row) {
   const text = String(term || '').trim();
-  const daysMatch = text.match(/^days\(\s*(.+?)\s*,\s*(.+?)\s*\)$/i);
-  if (daysMatch) {
-    const endDate = evaluateFormulaDateArg(schemaTable, daysMatch[1], row);
-    const startDate = evaluateFormulaDateArg(schemaTable, daysMatch[2], row);
+  const daysArgs = parseFormulaFunctionArgs(text, 'days');
+  if (daysArgs) {
+    if (daysArgs.length !== 2) return '';
+    const endDate = evaluateFormulaDateArg(schemaTable, daysArgs[0], row);
+    const startDate = evaluateFormulaDateArg(schemaTable, daysArgs[1], row);
     if (!endDate || !startDate) return '';
     return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
   }
@@ -2167,6 +2230,16 @@ function evaluateFormulaDateArg(schemaTable, value, row) {
     return toFormulaDate(row[dependency.columnName]);
   }
   return toFormulaDate(text);
+}
+
+function evaluateFormulaRawValue(schemaTable, value, row) {
+  const text = String(value || '').trim();
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (!tokenMatch) return text;
+  const dependency = parseFormulaToken(tokenMatch[1]);
+  if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) return '';
+  const raw = row[dependency.columnName];
+  return raw === undefined || raw === null ? '' : String(raw).trim();
 }
 
 function toFormulaDate(value) {
