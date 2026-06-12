@@ -1349,10 +1349,15 @@
 	            <span>按条件查找</span>
 	            <strong>满足以下条件</strong>
 	          </div>
-	          <div class="formula-builder-grid lookup-condition-grid">
+	          <div
+	            v-for="(condition, index) in fieldOptionConfig.lookupConditions"
+	            :key="condition.id"
+	            class="formula-builder-grid lookup-condition-grid"
+	            :class="{ 'no-current-field': !isLookupConditionNeedsCurrentField(condition) }"
+	          >
 	            <label>
 	              <span>来源表字段</span>
-	              <select v-model="fieldOptionConfig.lookupSourceMatchColumnName" :disabled="!fieldOptionConfig.lookupSourceTableName">
+	              <select v-model="condition.sourceMatchColumnName" :disabled="!fieldOptionConfig.lookupSourceTableName">
 	                <option value="">选择字段</option>
 	                <option
 	                  v-for="column in fieldOptionLookupSourceColumns"
@@ -1365,13 +1370,19 @@
 	            </label>
 	            <label>
 	              <span>条件</span>
-	              <select disabled>
-	                <option>等于</option>
+	              <select v-model="condition.conditionOperator" @change="handleLookupConditionOperatorChange(condition)">
+	                <option
+	                  v-for="option in fieldLookupConditionOptions"
+	                  :key="option.value"
+	                  :value="option.value"
+	                >
+	                  {{ option.label }}
+	                </option>
 	              </select>
 	            </label>
-	            <label>
+	            <label v-if="isLookupConditionNeedsCurrentField(condition)">
 	              <span>本表字段</span>
-	              <select v-model="fieldOptionConfig.lookupCurrentMatchColumnName">
+	              <select v-model="condition.currentMatchColumnName">
 	                <option value="">选择字段</option>
 	                <option
 	                  v-for="column in fieldOptionCurrentColumns"
@@ -1382,7 +1393,18 @@
 	                </option>
 	              </select>
 	            </label>
+	            <button
+	              class="secondary tool-button lookup-remove-button"
+	              type="button"
+	              :disabled="fieldOptionConfig.lookupConditions.length <= 1"
+	              @click="removeLookupCondition(index)"
+	            >
+	              删除
+	            </button>
 	          </div>
+	          <button class="secondary lookup-add-button" type="button" @click="addLookupCondition">
+	            + 添加条件
+	          </button>
 	        </div>
 
 	        <label class="field-option-editor">
@@ -1797,13 +1819,19 @@ const fieldOptionConfig = reactive({
   originalLookupSourceTableName: '',
   lookupResultColumnName: '',
   originalLookupResultColumnName: '',
-  lookupSourceMatchColumnName: '',
-  originalLookupSourceMatchColumnName: '',
-  lookupCurrentMatchColumnName: '',
-  originalLookupCurrentMatchColumnName: '',
+  lookupConditions: [],
+  originalLookupConditions: [],
   lookupAggregate: 'raw',
   originalLookupAggregate: 'raw'
 });
+const fieldLookupConditionOptions = [
+  { value: 'contains', label: '包含' },
+  { value: 'notContains', label: '不包含' },
+  { value: 'eq', label: '等于' },
+  { value: 'ne', label: '不等于' },
+  { value: 'empty', label: '为空' },
+  { value: 'notEmpty', label: '不为空' }
+];
 const fieldLookupAggregateOptions = [
   { value: 'raw', label: '原样引用' },
   { value: 'distinct', label: '去重引用' },
@@ -4230,10 +4258,8 @@ function openFieldOptionConfig(table, column) {
   fieldOptionConfig.originalLookupSourceTableName = fieldOptionConfig.lookupSourceTableName;
   fieldOptionConfig.lookupResultColumnName = lookupConfig.resultColumnName || '';
   fieldOptionConfig.originalLookupResultColumnName = fieldOptionConfig.lookupResultColumnName;
-  fieldOptionConfig.lookupSourceMatchColumnName = lookupConfig.sourceMatchColumnName || '';
-  fieldOptionConfig.originalLookupSourceMatchColumnName = fieldOptionConfig.lookupSourceMatchColumnName;
-  fieldOptionConfig.lookupCurrentMatchColumnName = lookupConfig.currentMatchColumnName || '';
-  fieldOptionConfig.originalLookupCurrentMatchColumnName = fieldOptionConfig.lookupCurrentMatchColumnName;
+  fieldOptionConfig.lookupConditions = normalizeLookupConditions(lookupConfig);
+  fieldOptionConfig.originalLookupConditions = cloneLookupConditions(fieldOptionConfig.lookupConditions);
   fieldOptionConfig.lookupAggregate = lookupConfig.aggregate || 'raw';
   fieldOptionConfig.originalLookupAggregate = fieldOptionConfig.lookupAggregate;
 }
@@ -4249,8 +4275,7 @@ function resetFieldOptionConfig() {
   fieldOptionConfig.sourceColumnName = fieldOptionConfig.originalSourceColumnName;
   fieldOptionConfig.lookupSourceTableName = fieldOptionConfig.originalLookupSourceTableName;
   fieldOptionConfig.lookupResultColumnName = fieldOptionConfig.originalLookupResultColumnName;
-  fieldOptionConfig.lookupSourceMatchColumnName = fieldOptionConfig.originalLookupSourceMatchColumnName;
-  fieldOptionConfig.lookupCurrentMatchColumnName = fieldOptionConfig.originalLookupCurrentMatchColumnName;
+  fieldOptionConfig.lookupConditions = cloneLookupConditions(fieldOptionConfig.originalLookupConditions);
   fieldOptionConfig.lookupAggregate = fieldOptionConfig.originalLookupAggregate;
 }
 
@@ -4269,6 +4294,83 @@ function parseFieldOptionText(value) {
   return result;
 }
 
+function createLookupCondition(values = {}) {
+  return {
+    id: values.id || `lookup-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    sourceMatchColumnName: values.sourceMatchColumnName || '',
+    conditionOperator: values.conditionOperator || 'eq',
+    currentMatchColumnName: values.currentMatchColumnName || ''
+  };
+}
+
+function cloneLookupConditions(conditions) {
+  return (conditions || []).map(condition => createLookupCondition({
+    sourceMatchColumnName: condition.sourceMatchColumnName,
+    conditionOperator: condition.conditionOperator,
+    currentMatchColumnName: condition.currentMatchColumnName
+  }));
+}
+
+function normalizeLookupConditions(config = {}) {
+  const rawConditions = Array.isArray(config.conditions) && config.conditions.length
+    ? config.conditions
+    : [{
+        sourceMatchColumnName: config.sourceMatchColumnName || '',
+        conditionOperator: config.conditionOperator || 'eq',
+        currentMatchColumnName: config.currentMatchColumnName || ''
+      }];
+  return rawConditions.map(condition => createLookupCondition(condition));
+}
+
+function addLookupCondition() {
+  fieldOptionConfig.lookupConditions.push(createLookupCondition());
+}
+
+function removeLookupCondition(index) {
+  if (fieldOptionConfig.lookupConditions.length <= 1) return;
+  fieldOptionConfig.lookupConditions.splice(index, 1);
+}
+
+function handleLookupConditionOperatorChange(condition) {
+  if (!isLookupConditionNeedsCurrentField(condition)) {
+    condition.currentMatchColumnName = '';
+  }
+}
+
+function isLookupConditionNeedsCurrentField(condition) {
+  return !['empty', 'notEmpty'].includes(condition?.conditionOperator || 'eq');
+}
+
+function parseLookupConditionsFromArgs(args, hasResultColumn) {
+  const conditionArgs = hasResultColumn ? args.slice(0, -1) : args;
+  const conditions = [];
+  for (let index = 0; index < conditionArgs.length;) {
+    const sourceMatch = parseLookupQualifiedColumn(conditionArgs[index]);
+    if (!sourceMatch) return [];
+    const conditionOperator = parseLookupConditionOperator(conditionArgs[index + 1]);
+    if (conditionOperator) {
+      const currentMatch = parseLookupCurrentColumn(conditionArgs[index + 2]);
+      if (!['empty', 'notEmpty'].includes(conditionOperator) && !currentMatch) return [];
+      conditions.push(createLookupCondition({
+        sourceMatchColumnName: sourceMatch.columnName,
+        conditionOperator,
+        currentMatchColumnName: currentMatch
+      }));
+      index += 3;
+      continue;
+    }
+    const currentMatch = parseLookupCurrentColumn(conditionArgs[index + 1]);
+    if (!currentMatch) return [];
+    conditions.push(createLookupCondition({
+      sourceMatchColumnName: sourceMatch.columnName,
+      conditionOperator: 'eq',
+      currentMatchColumnName: currentMatch
+    }));
+    index += 2;
+  }
+  return conditions;
+}
+
 function parseLookupConfigFromExpression(expression) {
   const text = String(expression || '').trim();
   const functionNames = [
@@ -4285,27 +4387,33 @@ function parseLookupConfigFromExpression(expression) {
     const args = parseMiddleFormulaFunctionArgs(text, functionName);
     if (!args || args.length < 2) continue;
     if (aggregate === 'count') {
-      const sourceMatch = parseLookupQualifiedColumn(args[0]);
-      const currentMatch = parseLookupCurrentColumn(args[1]);
-      if (!sourceMatch || !currentMatch) continue;
+      const firstSourceMatch = parseLookupQualifiedColumn(args[0]);
+      const conditions = parseLookupConditionsFromArgs(args, false);
+      if (!firstSourceMatch || !conditions.length) continue;
+      const firstCondition = conditions[0];
       return {
-        sourceTableName: sourceMatch.tableName,
-        sourceMatchColumnName: sourceMatch.columnName,
-        currentMatchColumnName: currentMatch,
-        resultColumnName: sourceMatch.columnName,
+        sourceTableName: firstSourceMatch.tableName,
+        sourceMatchColumnName: firstCondition.sourceMatchColumnName,
+        conditionOperator: firstCondition.conditionOperator,
+        currentMatchColumnName: firstCondition.currentMatchColumnName,
+        resultColumnName: firstSourceMatch.columnName,
+        conditions,
         aggregate
       };
     }
     if (args.length < 3) continue;
-    const sourceMatch = parseLookupQualifiedColumn(args[0]);
-    const currentMatch = parseLookupCurrentColumn(args[1]);
+    const firstSourceMatch = parseLookupQualifiedColumn(args[0]);
+    const conditions = parseLookupConditionsFromArgs(args, true);
     const result = parseLookupQualifiedColumn(args[args.length - 1]);
-    if (!sourceMatch || !currentMatch || !result) continue;
+    if (!firstSourceMatch || !conditions.length || !result) continue;
+    const firstCondition = conditions[0];
     return {
-      sourceTableName: result.tableName || sourceMatch.tableName,
-      sourceMatchColumnName: sourceMatch.columnName,
-      currentMatchColumnName: currentMatch,
+      sourceTableName: result.tableName || firstSourceMatch.tableName,
+      sourceMatchColumnName: firstCondition.sourceMatchColumnName,
+      conditionOperator: firstCondition.conditionOperator,
+      currentMatchColumnName: firstCondition.currentMatchColumnName,
       resultColumnName: result.columnName,
+      conditions,
       aggregate
     };
   }
@@ -4323,21 +4431,29 @@ function parseLookupCurrentColumn(value) {
   return match ? match[1] : '';
 }
 
+function parseLookupConditionOperator(value) {
+  const text = String(value || '').trim().replace(/^"|"$/g, '');
+  return fieldLookupConditionOptions.some(option => option.value === text) ? text : '';
+}
+
 function buildLookupFieldExpression(config) {
   const sourceTableName = config.sourceTableName;
-  const sourceMatchColumnName = config.sourceMatchColumnName;
-  const currentMatchColumnName = config.currentMatchColumnName;
   const resultColumnName = config.resultColumnName;
   const aggregate = config.aggregate || 'raw';
-  const matchPair = `${sourceTableName}.${sourceMatchColumnName},{this.${currentMatchColumnName}}`;
-  if (aggregate === 'sum') return `sumif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (aggregate === 'count') return `countif(${matchPair})`;
-  if (aggregate === 'countDistinct') return `countdistinctif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (aggregate === 'avg') return `avgif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (aggregate === 'max') return `maxif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (aggregate === 'min') return `minif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (aggregate === 'distinct') return `lookupdistinct(${matchPair},${sourceTableName}.${resultColumnName})`;
-  return `lookup(${matchPair},${sourceTableName}.${resultColumnName})`;
+  const conditions = normalizeLookupConditions(config);
+  const conditionExpression = conditions.map((condition) => {
+    const conditionOperator = condition.conditionOperator || 'eq';
+    const compareArg = ['empty', 'notEmpty'].includes(conditionOperator) ? '""' : `{this.${condition.currentMatchColumnName}}`;
+    return `${sourceTableName}.${condition.sourceMatchColumnName},"${conditionOperator}",${compareArg}`;
+  }).join(',');
+  if (aggregate === 'sum') return `sumif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'count') return `countif(${conditionExpression})`;
+  if (aggregate === 'countDistinct') return `countdistinctif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'avg') return `avgif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'max') return `maxif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'min') return `minif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (aggregate === 'distinct') return `lookupdistinct(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  return `lookup(${conditionExpression},${sourceTableName}.${resultColumnName})`;
 }
 
 function applyFieldOptionConfig() {
@@ -4349,15 +4465,26 @@ function applyFieldOptionConfig() {
   }
 
   if (fieldOptionConfig.mode === 'lookup') {
+    const lookupConditions = cloneLookupConditions(fieldOptionConfig.lookupConditions);
+    const invalidCondition = lookupConditions.some(condition =>
+      !condition.sourceMatchColumnName || (isLookupConditionNeedsCurrentField(condition) && !condition.currentMatchColumnName)
+    );
+    const firstCondition = lookupConditions[0] || createLookupCondition();
     const lookupConfig = {
       sourceTableName: fieldOptionConfig.lookupSourceTableName,
       resultColumnName: fieldOptionConfig.lookupResultColumnName,
-      sourceMatchColumnName: fieldOptionConfig.lookupSourceMatchColumnName,
-      currentMatchColumnName: fieldOptionConfig.lookupCurrentMatchColumnName,
+      sourceMatchColumnName: firstCondition.sourceMatchColumnName,
+      conditionOperator: firstCondition.conditionOperator || 'eq',
+      currentMatchColumnName: firstCondition.currentMatchColumnName,
+      conditions: lookupConditions.map(condition => ({
+        sourceMatchColumnName: condition.sourceMatchColumnName,
+        conditionOperator: condition.conditionOperator || 'eq',
+        currentMatchColumnName: condition.currentMatchColumnName
+      })),
       aggregate: fieldOptionConfig.lookupAggregate || 'raw'
     };
-    if (!lookupConfig.sourceTableName || !lookupConfig.resultColumnName || !lookupConfig.sourceMatchColumnName || !lookupConfig.currentMatchColumnName) {
-      tableConfigErrorText.value = '请选择引用表、引用字段、来源匹配字段和本表匹配字段';
+    if (!lookupConfig.sourceTableName || !lookupConfig.resultColumnName || !lookupConditions.length || invalidCondition) {
+      tableConfigErrorText.value = '请选择引用表、引用字段，并补全所有匹配条件';
       return;
     }
     const expression = buildLookupFieldExpression(lookupConfig);

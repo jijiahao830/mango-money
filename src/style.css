@@ -1357,7 +1357,7 @@ hr {
 }
 
 .field-option-modal {
-  width: min(560px, 100%);
+  width: min(760px, 100%);
 }
 
 .formula-config-modal {
@@ -1422,6 +1422,20 @@ hr {
   gap: 12px;
 }
 
+.field-lookup-config > .formula-builder-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.field-lookup-config label,
+.lookup-condition-panel label {
+  min-width: 0;
+}
+
+.field-lookup-config label span,
+.lookup-condition-panel label span {
+  white-space: nowrap;
+}
+
 .lookup-condition-panel {
   padding: 14px;
   border-radius: 8px;
@@ -1443,8 +1457,30 @@ hr {
 }
 
 .lookup-condition-grid {
-  grid-template-columns: minmax(0, 1fr) 112px minmax(0, 1fr);
+  align-items: end;
+  grid-template-columns: minmax(0, 1fr) 112px minmax(0, 1fr) auto;
+  margin: 0 0 10px;
+}
+
+.lookup-condition-grid.no-current-field {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2.4fr) auto;
+}
+
+.lookup-remove-button {
+  min-width: 64px;
   margin: 0;
+}
+
+.lookup-add-button {
+  justify-self: start;
+  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .field-lookup-config > .formula-builder-grid,
+  .lookup-condition-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .formula-insert-button {

@@ -393,6 +393,7 @@ sudo apt install -y chromium-browser webp
 - 公式支持跨表条件求和 `sumif(外表.匹配字段,{this.本表字段},外表.求和字段)`；可追加多组匹配条件，例如同车牌、同月份求和。
 - 公式支持跨表条件计数、去重计数、平均值、最大值、最小值、列表聚合：`countif()`、`countdistinctif()`、`avgif()`、`maxif()`、`minif()`、`listif()`。
 - 公式支持跨表查找引用 `lookup(外表.匹配字段,{this.本表字段},外表.引用字段)` 和去重引用 `lookupdistinct()`，用于按本表字段匹配其他表并带出字段值。
+- “根据数据表获取”的字段比对条件支持：包含、不包含、等于、不等于、为空、不为空；同一个字段可以添加多条比对条件，多条条件按“满足以下条件”处理，也就是全部满足后再引用或统计；这些条件会自动转换为跨表公式条件并由数据库视图计算。
 - 公式支持其他表字段聚合，例如 `{cw_srmxb.je.sum}`，聚合方式包括 `sum`、`avg`、`count`、`max`、`min`、`first`。
 
 公式配置保存于 `cw_formula_field_config`，中台展示视图不作为业务源表，实际保存仍写入原业务表。
@@ -499,7 +500,7 @@ sudo apt install -y chromium-browser webp
 
 - 固定选项：直接保存在 `cw_field_option_config.options_json`。
 - 数据表读取：保存在 `cw_field_option_config.option_source_type/source_table_name/source_column_name`，中台加载时从来源表读取去重后的字段值作为下拉选项。
-- 根据数据表获取：结构化配置保存在 `cw_field_option_config.lookup_config_json`，管理员选择引用表、引用字段、匹配条件和统计方式；后端自动生成公式配置并写入 `cw_formula_field_config`，不需要管理员手写公式。统计方式包括原样引用、去重引用、求和、计数、去重计数、平均值、最大值、最小值。
+- 根据数据表获取：结构化配置保存在 `cw_field_option_config.lookup_config_json`，管理员选择引用表、引用字段、一个或多个匹配条件和统计方式；后端自动生成公式配置并写入 `cw_formula_field_config`，不需要管理员手写公式。匹配条件包括包含、不包含、等于、不等于、为空、不为空；多条件按全部满足计算；统计方式包括原样引用、去重引用、求和、计数、去重计数、平均值、最大值、最小值。
 
 当前已配置：
 

@@ -2064,24 +2064,16 @@ function buildFormulaSqlValue(schemaTable, value) {
 }
 
 function buildFormulaSqlSumIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('sumif 参数格式应为：sumif(匹配字段, 当前字段, 求和字段)，可追加多组匹配字段和当前字段');
   }
   const sumColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
-  const tableName = sumColumn.tableName;
-  const conditions = [];
-  for (let index = 0; index < args.length - 1; index += 2) {
-    const matchColumn = parseFormulaQualifiedColumn(args[index]);
-    if (matchColumn.tableName !== tableName) {
-      throw new Error('sumif 的匹配字段和求和字段必须来自同一张表');
-    }
-    conditions.push(`${escapeIdentifier(matchColumn.columnName)} = ${buildFormulaSqlCompareArg(schemaTable, args[index + 1])}`);
-  }
-  return `(SELECT COALESCE(SUM(CAST(${escapeIdentifier(sumColumn.columnName)} AS DECIMAL(18,2))), 0) FROM ${escapeIdentifier(tableName)} WHERE ${conditions.join(' AND ')})`;
+  const conditions = buildFormulaSqlIfConditions(schemaTable, sumColumn.tableName, args.slice(0, -1));
+  return `(SELECT COALESCE(SUM(CAST(${escapeIdentifier(sumColumn.columnName)} AS DECIMAL(18,2))), 0) FROM ${escapeIdentifier(sumColumn.tableName)} WHERE ${conditions.join(' AND ')})`;
 }
 
 function buildFormulaSqlCountIf(schemaTable, args) {
-  if (args.length < 2 || args.length % 2 !== 0) {
+  if (args.length < 2) {
     throw new Error('countif 参数格式应为：countif(匹配字段, 当前字段)，可追加多组匹配字段和当前字段');
   }
   const firstColumn = parseFormulaQualifiedColumn(args[0]);
@@ -2091,7 +2083,7 @@ function buildFormulaSqlCountIf(schemaTable, args) {
 }
 
 function buildFormulaSqlCountDistinctIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('countdistinctif 参数格式应为：countdistinctif(匹配字段, 当前字段, 去重字段)，可追加多组匹配字段和当前字段');
   }
   const distinctColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2100,7 +2092,7 @@ function buildFormulaSqlCountDistinctIf(schemaTable, args) {
 }
 
 function buildFormulaSqlAvgIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('avgif 参数格式应为：avgif(匹配字段, 当前字段, 平均字段)，可追加多组匹配字段和当前字段');
   }
   const avgColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2109,7 +2101,7 @@ function buildFormulaSqlAvgIf(schemaTable, args) {
 }
 
 function buildFormulaSqlMaxIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('maxif 参数格式应为：maxif(匹配字段, 当前字段, 取最大字段)，可追加多组匹配字段和当前字段');
   }
   const maxColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2118,7 +2110,7 @@ function buildFormulaSqlMaxIf(schemaTable, args) {
 }
 
 function buildFormulaSqlMinIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('minif 参数格式应为：minif(匹配字段, 当前字段, 取最小字段)，可追加多组匹配字段和当前字段');
   }
   const minColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2127,7 +2119,7 @@ function buildFormulaSqlMinIf(schemaTable, args) {
 }
 
 function buildFormulaSqlListIf(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('listif 参数格式应为：listif(匹配字段, 当前字段, 列表字段)，可追加多组匹配字段和当前字段');
   }
   const listColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2136,7 +2128,7 @@ function buildFormulaSqlListIf(schemaTable, args) {
 }
 
 function buildFormulaSqlLookup(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('lookup 参数格式应为：lookup(匹配字段, 当前字段, 引用字段)，可追加多组匹配字段和当前字段');
   }
   const resultColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2145,7 +2137,7 @@ function buildFormulaSqlLookup(schemaTable, args) {
 }
 
 function buildFormulaSqlLookupDistinct(schemaTable, args) {
-  if (args.length < 3 || args.length % 2 !== 1) {
+  if (args.length < 3) {
     throw new Error('lookupdistinct 参数格式应为：lookupdistinct(匹配字段, 当前字段, 引用字段)，可追加多组匹配字段和当前字段');
   }
   const resultColumn = parseFormulaQualifiedColumn(args[args.length - 1]);
@@ -2155,14 +2147,47 @@ function buildFormulaSqlLookupDistinct(schemaTable, args) {
 
 function buildFormulaSqlIfConditions(schemaTable, expectedTableName, args) {
   const conditions = [];
-  for (let index = 0; index < args.length; index += 2) {
+  for (let index = 0; index < args.length;) {
     const matchColumn = parseFormulaQualifiedColumn(args[index]);
     if (matchColumn.tableName !== expectedTableName) {
       throw new Error('条件聚合函数的匹配字段和结果字段必须来自同一张表');
     }
-    conditions.push(`${escapeIdentifier(matchColumn.columnName)} = ${buildFormulaSqlCompareArg(schemaTable, args[index + 1])}`);
+    const operator = parseFormulaConditionOperator(args[index + 1]);
+    if (operator) {
+      conditions.push(buildFormulaSqlFieldCondition(schemaTable, matchColumn.columnName, operator, args[index + 2]));
+      index += 3;
+    } else {
+      conditions.push(buildFormulaSqlFieldCondition(schemaTable, matchColumn.columnName, 'eq', args[index + 1]));
+      index += 2;
+    }
   }
   return conditions;
+}
+
+function parseFormulaConditionOperator(value) {
+  const text = String(value || '').trim().replace(/^"|"$/g, '');
+  return ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty'].includes(text) ? text : '';
+}
+
+function buildFormulaSqlFieldCondition(schemaTable, columnName, operator, compareArg) {
+  const columnSql = escapeIdentifier(columnName);
+  if (operator === 'empty') {
+    return `(${columnSql} IS NULL OR CAST(${columnSql} AS CHAR) = '')`;
+  }
+  if (operator === 'notEmpty') {
+    return `(${columnSql} IS NOT NULL AND CAST(${columnSql} AS CHAR) <> '')`;
+  }
+  const compareSql = buildFormulaSqlCompareArg(schemaTable, compareArg);
+  if (operator === 'contains') {
+    return `(CAST(${columnSql} AS CHAR) LIKE CONCAT('%', CAST(${compareSql} AS CHAR), '%'))`;
+  }
+  if (operator === 'notContains') {
+    return `(${columnSql} IS NULL OR CAST(${columnSql} AS CHAR) NOT LIKE CONCAT('%', CAST(${compareSql} AS CHAR), '%'))`;
+  }
+  if (operator === 'ne') {
+    return `(${columnSql} IS NULL OR ${columnSql} <> ${compareSql})`;
+  }
+  return `${columnSql} = ${compareSql}`;
 }
 
 function parseFormulaQualifiedColumn(value) {
@@ -2713,14 +2738,32 @@ function normalizeSubmittedOptionConfig(config) {
 function normalizeLookupConfig(config) {
   if (!config || typeof config !== 'object') return null;
   const aggregate = String(config.aggregate || 'raw').trim();
+  const rawConditions = Array.isArray(config.conditions) && config.conditions.length
+    ? config.conditions
+    : [{
+        sourceMatchColumnName: config.sourceMatchColumnName,
+        currentMatchColumnName: config.currentMatchColumnName,
+        conditionOperator: config.conditionOperator
+      }];
+  const conditions = rawConditions.map((condition) => {
+    const conditionOperator = String(condition?.conditionOperator || 'eq').trim();
+    return {
+      sourceMatchColumnName: String(condition?.sourceMatchColumnName || '').trim(),
+      currentMatchColumnName: String(condition?.currentMatchColumnName || '').trim(),
+      conditionOperator: ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty'].includes(conditionOperator) ? conditionOperator : 'eq'
+    };
+  }).filter(condition => condition.sourceMatchColumnName || condition.currentMatchColumnName);
+  const firstCondition = conditions[0] || { sourceMatchColumnName: '', currentMatchColumnName: '', conditionOperator: 'eq' };
   const normalized = {
     sourceTableName: String(config.sourceTableName || '').trim(),
     resultColumnName: String(config.resultColumnName || '').trim(),
-    sourceMatchColumnName: String(config.sourceMatchColumnName || '').trim(),
-    currentMatchColumnName: String(config.currentMatchColumnName || '').trim(),
+    sourceMatchColumnName: firstCondition.sourceMatchColumnName,
+    currentMatchColumnName: firstCondition.currentMatchColumnName,
+    conditionOperator: firstCondition.conditionOperator,
+    conditions,
     aggregate: ['raw', 'distinct', 'sum', 'count', 'countDistinct', 'avg', 'max', 'min'].includes(aggregate) ? aggregate : 'raw'
   };
-  return Object.values(normalized).some(Boolean) ? normalized : null;
+  return normalized.sourceTableName || normalized.resultColumnName || normalized.conditions.length ? normalized : null;
 }
 
 function validateLookupOptionConfig(config, schemaTable, schemaMap, schemaColumn) {
@@ -2731,32 +2774,38 @@ function validateLookupOptionConfig(config, schemaTable, schemaMap, schemaColumn
   if (!sourceTable.columns.some(column => column.key === lookupConfig.resultColumnName)) {
     throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的引用字段不存在`);
   }
-  if (!sourceTable.columns.some(column => column.key === lookupConfig.sourceMatchColumnName)) {
-    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的来源匹配字段不存在`);
+  if (!lookupConfig.conditions.length) {
+    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 至少需要一个匹配条件`);
   }
-  if (!schemaTable.columns.some(column => column.key === lookupConfig.currentMatchColumnName)) {
-    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的本表匹配字段不存在`);
-  }
-  if (lookupConfig.currentMatchColumnName === schemaColumn.key) {
-    throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 不能用自己作为匹配字段`);
+  for (const condition of lookupConfig.conditions) {
+    if (!sourceTable.columns.some(column => column.key === condition.sourceMatchColumnName)) {
+      throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的来源匹配字段不存在`);
+    }
+    if (!['empty', 'notEmpty'].includes(condition.conditionOperator) && !schemaTable.columns.some(column => column.key === condition.currentMatchColumnName)) {
+      throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 的本表匹配字段不存在`);
+    }
+    if (!['empty', 'notEmpty'].includes(condition.conditionOperator) && condition.currentMatchColumnName === schemaColumn.key) {
+      throw new Error(`字段 ${schemaColumn.columnComment || schemaColumn.key} 不能用自己作为匹配字段`);
+    }
   }
 }
 
 function buildLookupExpressionFromConfig(config) {
   const lookupConfig = normalizeLookupConfig(config);
   const sourceTableName = lookupConfig.sourceTableName;
-  const sourceMatchColumnName = lookupConfig.sourceMatchColumnName;
-  const currentMatchColumnName = lookupConfig.currentMatchColumnName;
   const resultColumnName = lookupConfig.resultColumnName;
-  const matchPair = `${sourceTableName}.${sourceMatchColumnName},{this.${currentMatchColumnName}}`;
-  if (lookupConfig.aggregate === 'sum') return `sumif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (lookupConfig.aggregate === 'count') return `countif(${matchPair})`;
-  if (lookupConfig.aggregate === 'countDistinct') return `countdistinctif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (lookupConfig.aggregate === 'avg') return `avgif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (lookupConfig.aggregate === 'max') return `maxif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (lookupConfig.aggregate === 'min') return `minif(${matchPair},${sourceTableName}.${resultColumnName})`;
-  if (lookupConfig.aggregate === 'distinct') return `lookupdistinct(${matchPair},${sourceTableName}.${resultColumnName})`;
-  return `lookup(${matchPair},${sourceTableName}.${resultColumnName})`;
+  const conditionExpression = lookupConfig.conditions.map((condition) => {
+    const compareArg = ['empty', 'notEmpty'].includes(condition.conditionOperator) ? '""' : `{this.${condition.currentMatchColumnName}}`;
+    return `${sourceTableName}.${condition.sourceMatchColumnName},"${condition.conditionOperator}",${compareArg}`;
+  }).join(',');
+  if (lookupConfig.aggregate === 'sum') return `sumif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'count') return `countif(${conditionExpression})`;
+  if (lookupConfig.aggregate === 'countDistinct') return `countdistinctif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'avg') return `avgif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'max') return `maxif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'min') return `minif(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  if (lookupConfig.aggregate === 'distinct') return `lookupdistinct(${conditionExpression},${sourceTableName}.${resultColumnName})`;
+  return `lookup(${conditionExpression},${sourceTableName}.${resultColumnName})`;
 }
 
 async function saveFieldKindOnlyConfig(conn, tableName, columnName, fieldKind) {
