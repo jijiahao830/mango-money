@@ -910,6 +910,11 @@
               </label>
 
               <label>
+                <span>部门</span>
+                <input v-model="accountForm.department" placeholder="例如：财务部" />
+              </label>
+
+              <label>
                 <span>联系方式</span>
                 <input v-model="accountForm.contact" placeholder="可选" />
               </label>
@@ -948,6 +953,7 @@
               </div>
               <p>
                 账号：{{ user.username }}
+                <template v-if="user.department"> · 部门：{{ user.department }}</template>
                 <template v-if="user.contact"> · 联系方式：{{ user.contact }}</template>
                 · 权限：{{ permissionLabel(user.permission) }}
                 · 创建：{{ formatDisplayDate(user.createTime) }}
@@ -1028,7 +1034,12 @@
           <section v-if="selectedTableConfig" class="card table-management-panel">
             <header class="table-config-header">
               <div>
-                <h2>{{ selectedTableConfig.tableLabel || selectedTableConfig.tableName }}</h2>
+                <h2>
+                  <span>{{ selectedTableConfig.tableLabel || selectedTableConfig.tableName }}</span>
+                  <button class="secondary field-config-button" type="button" @click="openTablePropertyConfig(selectedTableConfig)">
+                    配置
+                  </button>
+                </h2>
                 <p>{{ selectedTableConfig.tableName }} · {{ selectedTableConfigVisibleColumns.length }} 个字段</p>
               </div>
               <label class="toggle-line">
@@ -1158,6 +1169,75 @@
 	      <span>{{ option.value === fieldKindMenu.currentKind ? '✓' : '' }}</span>
 	      {{ option.label }}
 	    </button>
+	  </div>
+
+	  <div v-if="tablePropertyConfig.isOpen" class="modal-backdrop confirm-backdrop">
+	    <section class="confirm-modal table-property-modal" role="dialog" aria-modal="true">
+	      <header class="modal-header">
+	        <div>
+	          <h2>{{ tablePropertyConfig.tableLabel }}</h2>
+	          <p>{{ tablePropertyConfig.tableName }} · 表配置</p>
+	        </div>
+	        <button class="secondary tool-button" type="button" @click="closeTablePropertyConfig">关闭</button>
+	      </header>
+
+	      <section class="table-property-section">
+	        <div class="table-property-section-title">
+	          <strong>部门可见配置</strong>
+	          <span>不选择部门时，所有部门可见</span>
+	        </div>
+	        <div class="department-choice-list">
+	          <label v-for="department in tableDepartmentOptions" :key="department" class="department-choice">
+	            <input
+	              type="checkbox"
+	              :checked="tablePropertyConfig.visibleDepartments.includes(department)"
+	              @change="toggleTableVisibleDepartment(department)"
+	            />
+	            <span>{{ department }}</span>
+	          </label>
+	        </div>
+	        <label class="department-custom-input">
+	          <span>添加部门</span>
+	          <div>
+	            <input v-model="tablePropertyConfig.departmentDraft" placeholder="输入部门名称" @keyup.enter="addTableVisibleDepartment" />
+	            <button class="secondary tool-button" type="button" @click="addTableVisibleDepartment">添加</button>
+	          </div>
+	        </label>
+	      </section>
+
+	      <section class="table-property-section">
+	        <div class="table-property-section-title">
+	          <strong>字段属性配置</strong>
+	          <span>系统生成字段保存时不能人工提交</span>
+	        </div>
+	        <div class="field-property-list">
+	          <div v-for="column in tablePropertyColumns" :key="column.key" class="field-property-row">
+	            <div class="field-property-name">
+	              <strong>{{ column.label }}</strong>
+	              <small>{{ column.key }}</small>
+	            </div>
+	            <label>
+	              <input v-model="getTableFieldProperty(column).editable" type="checkbox" :disabled="getTableFieldProperty(column).systemGenerated" />
+	              <span>可编辑</span>
+	            </label>
+	            <label>
+	              <input v-model="getTableFieldProperty(column).required" type="checkbox" />
+	              <span>必填</span>
+	            </label>
+	            <label>
+	              <input v-model="getTableFieldProperty(column).systemGenerated" type="checkbox" @change="handleTableFieldSystemGeneratedChange(column)" />
+	              <span>系统生成</span>
+	            </label>
+	            <input v-model="getTableFieldProperty(column).readonlyReason" class="field-property-reason" placeholder="说明" />
+	          </div>
+	        </div>
+	      </section>
+
+	      <footer class="modal-footer">
+	        <button class="secondary" type="button" @click="resetTablePropertyConfig">重置</button>
+	        <button type="button" @click="applyTablePropertyConfig">确定</button>
+	      </footer>
+	    </section>
 	  </div>
 
 	  <div v-if="middleFileModal.isOpen" class="modal-backdrop confirm-backdrop middle-file-modal-backdrop">
@@ -1712,6 +1792,7 @@ const loginForm = reactive({
 const accountForm = reactive({
   username: '',
   displayName: '',
+  department: '',
   contact: '',
   password: '',
   permission: 'finance'
@@ -1800,6 +1881,16 @@ const isTableConfigLoading = ref(false);
 const isTableConfigSaving = ref(false);
 const tableConfigStatusText = ref('');
 const tableConfigErrorText = ref('');
+const tablePropertyConfig = reactive({
+  isOpen: false,
+  tableName: '',
+  tableLabel: '',
+  visibleDepartments: [],
+  originalVisibleDepartments: [],
+  fieldProperties: {},
+  originalFieldProperties: {},
+  departmentDraft: ''
+});
 const fieldOptionConfig = reactive({
   isOpen: false,
   tableName: '',
@@ -1972,6 +2063,20 @@ const tableConfigDirectoryLabel = computed(() =>
 const tableConfigDirectoryCount = computed(() =>
   tableConfigDirectory.value === 'hidden' ? visibleTableConfigItems.value.length : hiddenTableConfigItems.value.length
 );
+const tableDepartmentOptions = computed(() => uniqueClientStrings([
+  ...users.value.map(user => user.department),
+  ...tableConfigItems.value.flatMap(table => table.visibleDepartments || []),
+  '财务部',
+  '销售部',
+  '业务部',
+  '车队',
+  '新媒体',
+  '测试'
+]));
+const tablePropertyColumns = computed(() => {
+  const table = tableConfigItems.value.find(item => item.tableName === tablePropertyConfig.tableName);
+  return (table?.columns || []).filter(column => !isHiddenTableConfigColumn(column.key));
+});
 const selectedMiddleRows = computed(() => {
   const table = selectedMiddleTable.value;
   if (!table) return [];
@@ -2157,6 +2262,7 @@ watch(activePage, (value) => {
       navigatePage('home');
       return;
     }
+    loadUsers();
     loadTableManagement();
   }
 
@@ -2263,7 +2369,11 @@ async function loadMiddlePlatform() {
   isMiddleLoading.value = true;
 
   try {
-    const response = await fetch('/api/middle-platform/tables');
+    const params = new URLSearchParams({
+      department: currentUser.value?.department || '',
+      permission: currentUser.value?.permission || ''
+    });
+    const response = await fetch(`/api/middle-platform/tables?${params.toString()}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '读取中台数据失败');
     middleTables.value = normalizeMiddleTables(data.tables || []);
@@ -2276,6 +2386,18 @@ async function loadMiddlePlatform() {
   } finally {
     isMiddleLoading.value = false;
   }
+}
+
+function uniqueClientStrings(values) {
+  const result = [];
+  const seen = new Set();
+  for (const value of values || []) {
+    const text = String(value || '').trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    result.push(text);
+  }
+  return result;
 }
 
 function clearMiddleFilters() {
@@ -3004,6 +3126,11 @@ function validateMiddleChanges() {
       return;
     }
 
+    if (column.isRequired && (Array.isArray(value) ? !value.length : String(value ?? '').trim() === '')) {
+      errors.push(`${prefix}${column.label} 必填`);
+      return;
+    }
+
     if (isMiddleMultiSelectColumn(column)) {
       const values = Array.isArray(value) ? value : parseMiddleFilterValues(value);
       const invalid = values.filter(item => !column.selectOptions.includes(item));
@@ -3030,12 +3157,19 @@ function validateMiddleChanges() {
   };
 
   const newRows = table.rows.filter(row => row.__isNew);
+  const requiredColumns = (table.columns || []).filter(column => column.isRequired && column.isEditable);
   for (let index = 0; index < newRows.length; index += 1) {
     const row = newRows[index];
     const changes = getMiddleInsertChanges(row);
     if (!Object.keys(changes).length) {
       errors.push(`新增第 ${index + 1} 行至少填写一个字段`);
       continue;
+    }
+    for (const column of requiredColumns) {
+      const value = changes[column.key] ?? row[column.key];
+      if (Array.isArray(value) ? !value.length : String(value ?? '').trim() === '') {
+        errors.push(`新增第 ${index + 1} 行 ${column.label} 必填`);
+      }
     }
     for (const [field, value] of Object.entries(changes)) {
       validateField(field, value, `新增第 ${index + 1} 行 `);
@@ -4081,7 +4215,9 @@ async function loadTableManagement() {
       ...table,
       visibleFields: Array.isArray(table.visibleFields)
         ? table.visibleFields.filter(field => !isHiddenTableConfigColumn(field))
-        : []
+        : [],
+      visibleDepartments: Array.isArray(table.visibleDepartments) ? table.visibleDepartments : [],
+      fieldProperties: table.fieldProperties && typeof table.fieldProperties === 'object' ? table.fieldProperties : {}
     }));
     tableConfigDirectory.value = 'visible';
     if (!filteredTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
@@ -4131,6 +4267,89 @@ function selectAllTableFields(table) {
 
 function clearTableFields(table) {
   table.visibleFields = [];
+}
+
+function cloneFieldProperties(properties = {}) {
+  return JSON.parse(JSON.stringify(properties || {}));
+}
+
+function createDefaultFieldProperty(column = {}) {
+  return {
+    editable: column.isEditable !== false,
+    required: column.isRequired === true,
+    systemGenerated: column.isSystemGenerated === true,
+    readonlyReason: column.readonlyReason || ''
+  };
+}
+
+function openTablePropertyConfig(table) {
+  tablePropertyConfig.isOpen = true;
+  tablePropertyConfig.tableName = table.tableName;
+  tablePropertyConfig.tableLabel = table.tableLabel || table.tableName;
+  tablePropertyConfig.visibleDepartments = [...(table.visibleDepartments || [])];
+  tablePropertyConfig.originalVisibleDepartments = [...tablePropertyConfig.visibleDepartments];
+  tablePropertyConfig.fieldProperties = cloneFieldProperties(table.fieldProperties || {});
+  tablePropertyConfig.originalFieldProperties = cloneFieldProperties(tablePropertyConfig.fieldProperties);
+  tablePropertyConfig.departmentDraft = '';
+}
+
+function closeTablePropertyConfig() {
+  tablePropertyConfig.isOpen = false;
+}
+
+function getTableFieldProperty(column) {
+  if (!tablePropertyConfig.fieldProperties[column.key]) {
+    tablePropertyConfig.fieldProperties[column.key] = createDefaultFieldProperty(column);
+  }
+  return tablePropertyConfig.fieldProperties[column.key];
+}
+
+function toggleTableVisibleDepartment(department) {
+  const departments = new Set(tablePropertyConfig.visibleDepartments || []);
+  if (departments.has(department)) departments.delete(department);
+  else departments.add(department);
+  tablePropertyConfig.visibleDepartments = [...departments];
+}
+
+function addTableVisibleDepartment() {
+  const department = tablePropertyConfig.departmentDraft.trim();
+  if (!department) return;
+  const departments = new Set(tablePropertyConfig.visibleDepartments || []);
+  departments.add(department);
+  tablePropertyConfig.visibleDepartments = [...departments];
+  tablePropertyConfig.departmentDraft = '';
+}
+
+function handleTableFieldSystemGeneratedChange(column) {
+  const property = getTableFieldProperty(column);
+  if (property.systemGenerated) property.editable = false;
+}
+
+function resetTablePropertyConfig() {
+  tablePropertyConfig.visibleDepartments = [...tablePropertyConfig.originalVisibleDepartments];
+  tablePropertyConfig.fieldProperties = cloneFieldProperties(tablePropertyConfig.originalFieldProperties);
+  tablePropertyConfig.departmentDraft = '';
+}
+
+function applyTablePropertyConfig() {
+  const table = tableConfigItems.value.find(item => item.tableName === tablePropertyConfig.tableName);
+  if (!table) {
+    closeTablePropertyConfig();
+    return;
+  }
+  table.visibleDepartments = uniqueClientStrings(tablePropertyConfig.visibleDepartments);
+  table.fieldProperties = cloneFieldProperties(tablePropertyConfig.fieldProperties);
+  for (const column of table.columns || []) {
+    const property = table.fieldProperties[column.key];
+    if (!property) continue;
+    column.isRequired = property.required === true;
+    column.isSystemGenerated = property.systemGenerated === true;
+    column.isEditable = column.isSystemGenerated ? false : property.editable !== false;
+    column.readonlyReason = property.readonlyReason || '';
+  }
+  tableConfigStatusText.value = '表属性配置已更新，点击保存配置后生效';
+  tableConfigErrorText.value = '';
+  closeTablePropertyConfig();
 }
 
 function isHiddenTableConfigColumn(key) {
@@ -4696,6 +4915,7 @@ async function createAccount() {
 
     accountForm.username = '';
     accountForm.displayName = '';
+    accountForm.department = '';
     accountForm.contact = '';
     accountForm.password = '';
     accountForm.permission = 'finance';
@@ -4779,6 +4999,7 @@ function clearAccountState() {
   users.value = [];
   accountForm.username = '';
   accountForm.displayName = '';
+  accountForm.department = '';
   accountForm.contact = '';
   accountForm.password = '';
   accountForm.permission = 'finance';

@@ -1180,6 +1180,10 @@ hr {
 }
 
 .table-config-header h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   margin: 0 0 4px;
   font-size: 20px;
 }
@@ -1268,6 +1272,107 @@ hr {
   border-radius: 7px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.table-property-modal {
+  width: min(920px, 100%);
+}
+
+.table-property-section {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.table-property-section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.table-property-section-title strong {
+  font-size: 15px;
+}
+
+.table-property-section-title span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.department-choice-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.department-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  padding: 6px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.department-choice input {
+  width: auto;
+}
+
+.department-custom-input > div {
+  display: flex;
+  gap: 8px;
+}
+
+.field-property-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.field-property-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto auto minmax(160px, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.field-property-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.field-property-name strong,
+.field-property-name small {
+  overflow-wrap: anywhere;
+}
+
+.field-property-name small {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.field-property-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.field-property-row input[type='checkbox'] {
+  width: auto;
+}
+
+.field-property-reason {
+  min-width: 0;
 }
 
 .middle-formula-value {
@@ -2224,5 +2329,19 @@ hr {
     display: flex;
     flex-direction: column;
     min-width: 0;
+  }
+
+  .table-property-section-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .department-custom-input > div {
+    flex-direction: column;
+  }
+
+  .field-property-row {
+    grid-template-columns: 1fr;
+    align-items: start;
   }
 }

@@ -83,7 +83,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/middle-platform/tables') {
-      const result = await listMiddlePlatformTables();
+      const result = await listMiddlePlatformTables({
+        department: url.searchParams.get('department') || '',
+        permission: url.searchParams.get('permission') || ''
+      });
       sendJson(res, result);
       return;
     }
@@ -564,7 +567,7 @@ async function listHistoryImages() {
   return { ok: true, groups };
 }
 
-async function listMiddlePlatformTables() {
+async function listMiddlePlatformTables(viewer = {}) {
   const conn = await createMysqlConnection();
   try {
     await ensureTableViewConfigTable(conn);
@@ -572,7 +575,7 @@ async function listMiddlePlatformTables() {
     await ensureFormulaFieldConfigTable(conn);
 
     const [configs] = await conn.execute(`
-      SELECT table_name, table_label, visible_fields
+      SELECT table_name, table_label, visible_fields, visible_departments, field_properties_json
       FROM cw_table_view_config
       WHERE is_visible = 1
       ORDER BY sort_order ASC, id ASC
@@ -582,14 +585,20 @@ async function listMiddlePlatformTables() {
     const tables = [];
 
     for (const config of configs) {
+      const visibleDepartments = normalizeStringArray(parseJsonArray(config.visible_departments));
+      if (!canViewMiddleTableByDepartment(visibleDepartments, viewer)) continue;
       const schemaTable = schemaTables.find(table => table.tableName === config.table_name);
       if (!schemaTable) continue;
+      const fieldProperties = normalizeTableFieldProperties(parseJsonObject(config.field_properties_json));
       const formulaConfigs = formulaConfigsByTable.get(schemaTable.tableName) || [];
       const viewName = formulaConfigs.length
         ? await syncFormulaView(conn, schemaTable, formulaConfigs)
         : '';
 
-      const allowedColumns = attachFormulaConfigsToColumns(schemaTable, formulaConfigs);
+      const allowedColumns = applyTableFieldPropertiesToColumns(
+        attachFormulaConfigsToColumns(schemaTable, formulaConfigs),
+        fieldProperties
+      );
       const configuredFields = parseJsonArray(config.visible_fields);
       const visibleKeys = configuredFields.length
         ? configuredFields.filter(field => allowedColumns.some(column => column.key === field))
@@ -619,6 +628,8 @@ async function listMiddlePlatformTables() {
         viewName,
         primaryKey: primaryKeyColumn?.key || '',
         role: '',
+        visibleDepartments,
+        fieldProperties,
         columns,
         rows: hydratedRows
       });
@@ -644,11 +655,22 @@ async function saveMiddlePlatformTableData(payload) {
     const schemaTables = await getSchemaTables(conn);
     const schemaTable = schemaTables.find(table => table.tableName === tableName);
     if (!schemaTable) throw new Error(`表不存在或不允许编辑：${tableName}`);
+    const visibleDepartments = await getTableVisibleDepartments(conn, tableName);
+    if (!canViewMiddleTableByDepartment(visibleDepartments, operator)) {
+      const error = new Error(`${schemaTable.tableComment || tableName} 当前部门不可操作`);
+      error.statusCode = 403;
+      throw error;
+    }
 
     const primaryKeyColumn = getPrimaryKeyColumn(schemaTable);
     if (!primaryKeyColumn) throw new Error(`${schemaTable.tableComment || tableName} 没有主键，不能在线编辑`);
 
-    const columnsByKey = new Map(schemaTable.columns.map(column => [column.key, column]));
+    const tableFieldProperties = await getTableFieldProperties(conn, tableName);
+    const effectiveSchemaTable = {
+      ...schemaTable,
+      columns: applyTableFieldPropertiesToColumns(schemaTable.columns, tableFieldProperties)
+    };
+    const columnsByKey = new Map(effectiveSchemaTable.columns.map(column => [column.key, column]));
     const formulaConfigs = await getFormulaConfigsForTable(conn, schemaTable);
     let inserted = 0;
     let updated = 0;
@@ -666,7 +688,7 @@ async function saveMiddlePlatformTableData(payload) {
       const changes = inserts[rowIndex]?.changes && typeof inserts[rowIndex].changes === 'object'
         ? { ...inserts[rowIndex].changes }
         : {};
-      applyServerFormulaChanges(schemaTable, formulaConfigs, changes, {}, { force: true });
+      applyServerFormulaChanges(effectiveSchemaTable, formulaConfigs, changes, {}, { force: true });
       const fields = [];
       const values = [];
 
@@ -678,6 +700,10 @@ async function saveMiddlePlatformTableData(payload) {
         }
         if (!column.isEditable) {
           errors.push(`新增第 ${rowIndex + 1} 行：${column.label} 不允许编辑`);
+          continue;
+        }
+        if (column.isRequired && (Array.isArray(rawValue) ? !rawValue.length : String(rawValue ?? '').trim() === '')) {
+          errors.push(`新增第 ${rowIndex + 1} 行：${column.label} 必填`);
           continue;
         }
 
@@ -696,6 +722,10 @@ async function saveMiddlePlatformTableData(payload) {
       if (!fields.length) {
         errors.push(`新增第 ${rowIndex + 1} 行至少填写一个字段`);
         continue;
+      }
+      for (const column of effectiveSchemaTable.columns.filter(item => item.isRequired && item.isEditable)) {
+        if (fields.includes(column.key)) continue;
+        errors.push(`新增第 ${rowIndex + 1} 行：${column.label} 必填`);
       }
 
       const [result] = await conn.execute(
@@ -733,7 +763,7 @@ async function saveMiddlePlatformTableData(payload) {
       const setParts = [];
       const values = [];
       applyServerFormulaChanges(
-        schemaTable,
+        effectiveSchemaTable,
         formulaConfigs,
         changes,
         updateBaseRows.get(String(primaryValue)) || {},
@@ -748,6 +778,10 @@ async function saveMiddlePlatformTableData(payload) {
         }
         if (!column.isEditable) {
           errors.push(`${column.label} 不允许编辑`);
+          continue;
+        }
+        if (column.isRequired && (Array.isArray(rawValue) ? !rawValue.length : String(rawValue ?? '').trim() === '')) {
+          errors.push(`${column.label} 必填`);
           continue;
         }
 
@@ -851,7 +885,7 @@ async function getTableManagementConfig() {
     const schemaTables = await getSchemaTables(conn);
     const formulaConfigsByTable = await getFormulaConfigsByTable(conn, schemaTables);
     const [configs] = await conn.execute(`
-      SELECT table_name, table_label, is_visible, visible_fields, sort_order
+      SELECT table_name, table_label, is_visible, visible_fields, visible_departments, field_properties_json, sort_order
       FROM cw_table_view_config
       ORDER BY sort_order ASC, id ASC
     `);
@@ -870,6 +904,8 @@ async function getTableManagementConfig() {
         visibleFields: config
           ? configuredVisibleFields
           : getConfigurableTableFields(table),
+        visibleDepartments: normalizeStringArray(parseJsonArray(config?.visible_departments)),
+        fieldProperties: normalizeTableFieldProperties(parseJsonObject(config?.field_properties_json)),
         columns: attachFormulaConfigsToColumns(table, formulaConfigsByTable.get(table.tableName) || [])
       };
     });
@@ -902,6 +938,8 @@ async function saveTableManagementConfig(payload) {
       const tableLabel = String(item.tableLabel || schemaTable.tableComment || schemaTable.tableName).trim();
       const isVisible = item.isVisible ? 1 : 0;
       const sortOrder = Number.isFinite(Number(item.sortOrder)) ? Number(item.sortOrder) : index + 1;
+      const visibleDepartments = normalizeStringArray(item.visibleDepartments);
+      const fieldProperties = normalizeSubmittedTableFieldProperties(item.fieldProperties, schemaTable);
 
       await conn.execute(
         `INSERT INTO cw_table_view_config (
@@ -909,18 +947,24 @@ async function saveTableManagementConfig(payload) {
           table_label,
           is_visible,
           visible_fields,
+          visible_departments,
+          field_properties_json,
           sort_order
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
           table_label = VALUES(table_label),
           is_visible = VALUES(is_visible),
           visible_fields = VALUES(visible_fields),
+          visible_departments = VALUES(visible_departments),
+          field_properties_json = VALUES(field_properties_json),
           sort_order = VALUES(sort_order)`,
         [
           schemaTable.tableName,
           tableLabel,
           isVisible,
           JSON.stringify(visibleFields),
+          JSON.stringify(visibleDepartments),
+          JSON.stringify(fieldProperties),
           sortOrder
         ]
       );
@@ -1061,7 +1105,7 @@ async function loginUser(payload) {
     await ensureUserLoginLogTable(conn);
     const encryptedPassword = await encryptUserPassword(password);
     const [rows] = await conn.execute(
-      `SELECT id, username, display_name AS displayName, permission FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND password = ? AND status = 1 LIMIT 1`,
+      `SELECT id, username, display_name AS displayName, department, permission FROM ${escapeIdentifier(USER_TABLE)} WHERE username = ? AND password = ? AND status = 1 LIMIT 1`,
       [username, encryptedPassword]
     );
 
@@ -1102,6 +1146,7 @@ async function listUsers() {
         password,
         status,
         display_name AS displayName,
+        department,
         contact,
         permission
       FROM ${escapeIdentifier(USER_TABLE)}
@@ -1124,6 +1169,7 @@ async function createUser(payload) {
   const username = String(payload.username || '').trim();
   const password = String(payload.password || '');
   const displayName = String(payload.displayName || '').trim();
+  const department = String(payload.department || '').trim();
   const contact = String(payload.contact || '').trim();
   const permission = USER_PERMISSIONS.includes(payload.permission)
     ? payload.permission
@@ -1149,10 +1195,11 @@ async function createUser(payload) {
         password,
         status,
         display_name,
+        department,
         contact,
         permission
-      ) VALUES (?, ?, 1, ?, ?, ?)`,
-      [username, encryptedPassword, displayName, contact, permission]
+      ) VALUES (?, ?, 1, ?, ?, ?, ?)`,
+      [username, encryptedPassword, displayName, department, contact, permission]
     );
     return { ok: true, id: result.insertId };
   } finally {
@@ -1375,6 +1422,10 @@ async function ensureUserOptionalColumns(conn) {
     await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN contact VARCHAR(100) NOT NULL DEFAULT '' COMMENT '联系方式' AFTER display_name`);
   }
 
+  if (!names.has('department')) {
+    await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN department VARCHAR(100) NOT NULL DEFAULT '' COMMENT '部门' AFTER display_name`);
+  }
+
   if (!names.has('permission')) {
     await conn.execute(`ALTER TABLE ${escapeIdentifier(USER_TABLE)} ADD COLUMN permission ENUM('administrator','fleet_manager','sales','finance') NOT NULL DEFAULT 'finance' COMMENT '权限' AFTER status`);
     return;
@@ -1428,7 +1479,9 @@ function normalizeAuditUser(value = {}) {
   return {
     userId: value.id === undefined || value.id === null || value.id === '' ? null : Number(value.id),
     username: String(value.username || '').trim(),
-    displayName: String(value.displayName || value.display_name || '').trim()
+    displayName: String(value.displayName || value.display_name || '').trim(),
+    department: String(value.department || '').trim(),
+    permission: String(value.permission || '').trim()
   };
 }
 
@@ -1483,9 +1536,19 @@ async function ensureTableViewConfigTable(conn) {
     table_label VARCHAR(100) NOT NULL DEFAULT '' COMMENT '表中文显示名',
     is_visible TINYINT NOT NULL DEFAULT 0 COMMENT '是否在中台显示：0不显示，1显示',
     visible_fields JSON NULL COMMENT '中台显示字段列表',
+    visible_departments JSON NULL COMMENT '可见部门列表，空表示不限部门',
+    field_properties_json JSON NULL COMMENT '字段属性配置',
     sort_order INT NOT NULL DEFAULT 0 COMMENT '显示排序',
     UNIQUE KEY uk_table_name (table_name)
   ) DEFAULT CHARSET=utf8mb4 COMMENT='中台表格显示配置'`);
+  const [columns] = await conn.execute(`SHOW COLUMNS FROM cw_table_view_config`);
+  const names = new Set(columns.map(column => column.Field));
+  if (!names.has('visible_departments')) {
+    await conn.execute(`ALTER TABLE cw_table_view_config ADD COLUMN visible_departments JSON NULL COMMENT '可见部门列表，空表示不限部门' AFTER visible_fields`);
+  }
+  if (!names.has('field_properties_json')) {
+    await conn.execute(`ALTER TABLE cw_table_view_config ADD COLUMN field_properties_json JSON NULL COMMENT '字段属性配置' AFTER visible_departments`);
+  }
 }
 
 async function ensureFieldOptionConfigTable(conn) {
@@ -1659,6 +1722,61 @@ function parseJsonObject(value) {
   } catch {
     return null;
   }
+}
+
+function normalizeTableFieldProperties(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const result = {};
+  for (const [columnName, rawProperty] of Object.entries(value)) {
+    if (!rawProperty || typeof rawProperty !== 'object' || Array.isArray(rawProperty)) continue;
+    result[columnName] = {
+      editable: rawProperty.editable !== false,
+      required: rawProperty.required === true,
+      systemGenerated: rawProperty.systemGenerated === true,
+      readonlyReason: String(rawProperty.readonlyReason || '').trim()
+    };
+  }
+  return result;
+}
+
+function normalizeSubmittedTableFieldProperties(value, schemaTable) {
+  const properties = normalizeTableFieldProperties(value);
+  const allowedColumns = new Set((schemaTable.columns || []).map(column => column.key));
+  const result = {};
+  for (const [columnName, property] of Object.entries(properties)) {
+    if (!allowedColumns.has(columnName)) continue;
+    const normalized = {
+      editable: property.editable !== false,
+      required: property.required === true,
+      systemGenerated: property.systemGenerated === true,
+      readonlyReason: property.readonlyReason || ''
+    };
+    if (normalized.editable === true && normalized.required === false && normalized.systemGenerated === false && !normalized.readonlyReason) continue;
+    result[columnName] = normalized;
+  }
+  return result;
+}
+
+function applyTableFieldPropertiesToColumns(columns, fieldProperties = {}) {
+  return (columns || []).map((column) => {
+    const property = fieldProperties[column.key] || {};
+    const systemGenerated = column.isSystemGenerated || property.systemGenerated === true;
+    const editable = systemGenerated ? false : (property.editable === false ? false : column.isEditable);
+    return {
+      ...column,
+      isEditable: editable,
+      isRequired: property.required === true,
+      isSystemGenerated: systemGenerated,
+      readonlyReason: property.readonlyReason || column.readonlyReason || ''
+    };
+  });
+}
+
+function canViewMiddleTableByDepartment(visibleDepartments, viewer = {}) {
+  if (!visibleDepartments.length) return true;
+  if (viewer.permission === 'administrator') return true;
+  const department = String(viewer.department || '').trim();
+  return Boolean(department && visibleDepartments.includes(department));
 }
 
 async function getWecomSelectOptionsByDbField() {
@@ -2711,6 +2829,11 @@ function uniqueStrings(values) {
   return result;
 }
 
+function normalizeStringArray(value) {
+  if (Array.isArray(value)) return uniqueStrings(value);
+  return [];
+}
+
 function isConfigurableSelectColumn(column) {
   if (column?.enumValues?.length) return true;
   return column?.dataType === 'json' && Array.isArray(column.selectOptions) && column.selectOptions.length > 0;
@@ -2828,6 +2951,30 @@ async function saveFieldKindOnlyConfig(conn, tableName, columnName, fieldKind) {
       field_kind = VALUES(field_kind)`,
     [tableName, columnName, fieldKind]
   );
+}
+
+async function getTableFieldProperties(conn, tableName) {
+  await ensureTableViewConfigTable(conn);
+  const [rows] = await conn.execute(
+    `SELECT field_properties_json
+     FROM cw_table_view_config
+     WHERE table_name = ?
+     LIMIT 1`,
+    [tableName]
+  );
+  return normalizeTableFieldProperties(parseJsonObject(rows[0]?.field_properties_json));
+}
+
+async function getTableVisibleDepartments(conn, tableName) {
+  await ensureTableViewConfigTable(conn);
+  const [rows] = await conn.execute(
+    `SELECT visible_departments
+     FROM cw_table_view_config
+     WHERE table_name = ?
+     LIMIT 1`,
+    [tableName]
+  );
+  return normalizeStringArray(parseJsonArray(rows[0]?.visible_departments));
 }
 
 function parseEnumValues(columnType) {
