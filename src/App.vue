@@ -3599,7 +3599,7 @@ function evaluateMiddleFormulaCondition(row, condition) {
   }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) return false;
-  const left = Number(evaluateMiddleFormulaTerm(row, match[1]));
+  const left = Number(evaluateMiddleFormulaNumericExpression(row, match[1]));
   const right = Number(match[3]);
   if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
   switch (match[2]) {

@@ -2523,7 +2523,7 @@ function buildFormulaSqlCondition(schemaTable, condition) {
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) throw new Error(`公式条件格式无效：${condition}`);
   const operator = match[2] === '==' ? '=' : match[2];
-  return `${buildFormulaSqlTerm(schemaTable, match[1])} ${operator} ${Number(match[3])}`;
+  return `${buildFormulaSqlNumericExpression(schemaTable, match[1])} ${operator} ${Number(match[3])}`;
 }
 
 function buildFormulaSqlRawArg(schemaTable, value) {
@@ -2930,7 +2930,7 @@ function evaluateFormulaCondition(schemaTable, condition, row) {
   }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) return false;
-  const left = Number(evaluateFormulaTerm(schemaTable, match[1], row));
+  const left = Number(evaluateFormulaNumericExpression(schemaTable, match[1], row));
   const right = Number(match[3]);
   if (!Number.isFinite(left) || !Number.isFinite(right)) return false;
   switch (match[2]) {
