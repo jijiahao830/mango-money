@@ -2401,17 +2401,83 @@ function buildFormulaSqlConcat(schemaTable, args) {
 }
 
 function buildFormulaSqlNumericExpression(schemaTable, expression) {
-  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
-    const dependency = parseFormulaToken(token);
+  const text = String(expression || '').trim();
+  const additive = findTopLevelFormulaOperator(text, ['+', '-']);
+  if (additive) {
+    return `(${buildFormulaSqlNumericExpression(schemaTable, text.slice(0, additive.index))} ${additive.operator} ${buildFormulaSqlNumericExpression(schemaTable, text.slice(additive.index + 1))})`;
+  }
+  const multiplicative = findTopLevelFormulaOperator(text, ['*', '/']);
+  if (multiplicative) {
+    return `(${buildFormulaSqlNumericExpression(schemaTable, text.slice(0, multiplicative.index))} ${multiplicative.operator} ${buildFormulaSqlNumericExpression(schemaTable, text.slice(multiplicative.index + 1))})`;
+  }
+  if (isWrappedFormulaParentheses(text)) {
+    return `(${buildFormulaSqlNumericExpression(schemaTable, text.slice(1, -1))})`;
+  }
+  return buildFormulaSqlNumericTerm(schemaTable, text);
+}
+
+function buildFormulaSqlNumericTerm(schemaTable, expression) {
+  const text = String(expression || '').trim();
+  if (!text) return '0';
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
     if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
-      throw new Error(`公式引用了不存在的本表字段：${token}`);
+      throw new Error(`公式引用了不存在的本表字段：${tokenMatch[1]}`);
     }
     return `COALESCE(base.${escapeIdentifier(dependency.columnName)}, 0)`;
-  });
-  if (/[^0-9+\-*/().,\s`a-zA-Z_]/.test(safeExpression)) {
-    throw new Error(`公式数值表达式格式无效：${expression}`);
   }
-  return `(${safeExpression})`;
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return String(Number(text));
+  return buildFormulaSqlValue(schemaTable, text);
+}
+
+function findTopLevelFormulaOperator(expression, operators) {
+  const text = String(expression || '').trim();
+  let depth = 0;
+  let inString = false;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const char = text[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === ')') {
+      depth += 1;
+      continue;
+    }
+    if (char === '(') {
+      depth -= 1;
+      continue;
+    }
+    if (depth !== 0 || !operators.includes(char)) continue;
+    if (index === 0) continue;
+    const prev = text[index - 1];
+    if (['+', '-', '*', '/', '('].includes(prev)) continue;
+    return { index, operator: char };
+  }
+  return null;
+}
+
+function isWrappedFormulaParentheses(expression) {
+  const text = String(expression || '').trim();
+  if (!text.startsWith('(') || !text.endsWith(')')) return false;
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0 && index !== text.length - 1) return false;
+    }
+  }
+  return depth === 0;
 }
 
 function buildFormulaSqlCondition(schemaTable, condition) {
@@ -2784,19 +2850,41 @@ function evaluateFormulaMonthLabel(schemaTable, args, row) {
 }
 
 function evaluateFormulaNumericExpression(schemaTable, expression, row) {
-  const currentColumns = new Set(schemaTable.columns.map(column => column.key));
-  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
-    const dependency = parseFormulaToken(token);
-    if (dependency.scope !== 'current' || !currentColumns.has(dependency.columnName)) return '0';
-    return String(toFormulaNumber(row[dependency.columnName]));
-  });
-  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
-  try {
-    const value = Function(`"use strict"; return (${safeExpression});`)();
-    return Number.isFinite(Number(value)) ? Number(value) : '';
-  } catch {
-    return '';
+  const text = String(expression || '').trim();
+  const additive = findTopLevelFormulaOperator(text, ['+', '-']);
+  if (additive) {
+    const left = Number(evaluateFormulaNumericExpression(schemaTable, text.slice(0, additive.index), row));
+    const right = Number(evaluateFormulaNumericExpression(schemaTable, text.slice(additive.index + 1), row));
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return '';
+    return additive.operator === '+' ? left + right : left - right;
   }
+  const multiplicative = findTopLevelFormulaOperator(text, ['*', '/']);
+  if (multiplicative) {
+    const left = Number(evaluateFormulaNumericExpression(schemaTable, text.slice(0, multiplicative.index), row));
+    const right = Number(evaluateFormulaNumericExpression(schemaTable, text.slice(multiplicative.index + 1), row));
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return '';
+    if (multiplicative.operator === '/' && right === 0) return '';
+    return multiplicative.operator === '*' ? left * right : left / right;
+  }
+  if (isWrappedFormulaParentheses(text)) {
+    return evaluateFormulaNumericExpression(schemaTable, text.slice(1, -1), row);
+  }
+  return evaluateFormulaNumericTerm(schemaTable, text, row);
+}
+
+function evaluateFormulaNumericTerm(schemaTable, expression, row) {
+  const text = String(expression || '').trim();
+  if (!text) return 0;
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const dependency = parseFormulaToken(tokenMatch[1]);
+    if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) return 0;
+    return toFormulaNumber(row[dependency.columnName]);
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  const value = evaluateFormulaValue(schemaTable, text, row);
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : '';
 }
 
 function evaluateFormulaCondition(schemaTable, condition, row) {

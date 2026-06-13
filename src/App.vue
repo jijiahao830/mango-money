@@ -3509,18 +3509,69 @@ function evaluateMiddleFormulaMonthLabel(row, args) {
 }
 
 function evaluateMiddleFormulaNumericExpression(row, expression) {
-  const safeExpression = String(expression || '').replace(/\{([^{}]+)\}/g, (_, token) => {
-    const parts = token.split('.').map(part => part.trim()).filter(Boolean);
-    if (parts.length === 2 && parts[0] === 'this') return String(toFormulaNumber(row?.[parts[1]]));
-    return '0';
-  });
-  if (/[^0-9+\-*/().,\s]/.test(safeExpression)) return '';
-  try {
-    const value = Function(`"use strict"; return (${safeExpression});`)();
-    return Number.isFinite(Number(value)) ? Number(value) : '';
-  } catch {
-    return '';
+  const text = String(expression || '').trim();
+  const additive = findTopLevelFormulaBinaryOperator(text, ['+', '-']);
+  if (additive) {
+    const left = Number(evaluateMiddleFormulaNumericExpression(row, text.slice(0, additive.index)));
+    const right = Number(evaluateMiddleFormulaNumericExpression(row, text.slice(additive.index + 1)));
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return '';
+    return additive.operator === '+' ? left + right : left - right;
   }
+  const multiplicative = findTopLevelFormulaBinaryOperator(text, ['*', '/']);
+  if (multiplicative) {
+    const left = Number(evaluateMiddleFormulaNumericExpression(row, text.slice(0, multiplicative.index)));
+    const right = Number(evaluateMiddleFormulaNumericExpression(row, text.slice(multiplicative.index + 1)));
+    if (!Number.isFinite(left) || !Number.isFinite(right)) return '';
+    if (multiplicative.operator === '/' && right === 0) return '';
+    return multiplicative.operator === '*' ? left * right : left / right;
+  }
+  if (isWrappedFormulaParentheses(text)) {
+    return evaluateMiddleFormulaNumericExpression(row, text.slice(1, -1));
+  }
+  return evaluateMiddleFormulaNumericTerm(row, text);
+}
+
+function evaluateMiddleFormulaNumericTerm(row, expression) {
+  const text = String(expression || '').trim();
+  if (!text) return 0;
+  const tokenMatch = text.match(/^\{([^{}]+)\}$/);
+  if (tokenMatch) {
+    const parts = tokenMatch[1].split('.').map(part => part.trim()).filter(Boolean);
+    if (parts.length === 2 && parts[0] === 'this') return toFormulaNumber(row?.[parts[1]]);
+    return 0;
+  }
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+  const value = evaluateMiddleFormulaValue(row, text);
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : '';
+}
+
+function findTopLevelFormulaBinaryOperator(expression, operators) {
+  const text = String(expression || '').trim();
+  let depth = 0;
+  let inString = false;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const char = text[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === ')') {
+      depth += 1;
+      continue;
+    }
+    if (char === '(') {
+      depth -= 1;
+      continue;
+    }
+    if (depth !== 0 || !operators.includes(char)) continue;
+    if (index === 0) continue;
+    const prev = text[index - 1];
+    if (['+', '-', '*', '/', '('].includes(prev)) continue;
+    return { index, operator: char };
+  }
+  return null;
 }
 
 function evaluateMiddleFormulaCondition(row, condition) {
