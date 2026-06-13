@@ -1353,7 +1353,7 @@
 	        <textarea v-model="fieldOptionConfig.optionText" rows="10" placeholder="每行填写一个选项"></textarea>
 	      </label>
 
-	      <div v-else-if="fieldOptionConfig.mode === 'table'" class="formula-builder-grid">
+	      <div v-else-if="fieldOptionConfig.mode === 'table'" class="field-option-table-source">
 	        <label>
 	          <span>来源表</span>
 	          <select v-model="fieldOptionConfig.sourceTableName">

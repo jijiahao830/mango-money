@@ -1530,6 +1530,21 @@ hr {
   white-space: nowrap;
 }
 
+.field-option-table-source {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin: 10px 0;
+}
+
+.field-option-table-source label {
+  min-width: 0;
+}
+
+.field-option-table-source label span {
+  white-space: nowrap;
+}
+
 .formula-builder-grid-wide {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px auto;
 }
@@ -1903,6 +1918,14 @@ hr {
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 28px 90px rgba(15, 23, 42, 0.32);
+}
+
+.confirm-modal.field-option-modal {
+  width: min(760px, calc(100vw - 32px));
+}
+
+.confirm-modal.field-option-modal.formula-config-modal {
+  width: min(820px, calc(100vw - 32px));
 }
 
 .modal-header,
