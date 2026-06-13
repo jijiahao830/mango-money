@@ -3380,7 +3380,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workday|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3436,6 +3436,8 @@ function evaluateMiddleFormulaValue(row, expression) {
   if (dateAddArgs) return evaluateMiddleFormulaDateAdd(row, dateAddArgs);
   const workdayAddArgs = parseMiddleFormulaFunctionArgs(text, 'workdayadd');
   if (workdayAddArgs) return evaluateMiddleFormulaWorkdayAdd(row, workdayAddArgs);
+  const workdayArgs = parseMiddleFormulaFunctionArgs(text, 'workday');
+  if (workdayArgs) return evaluateMiddleFormulaWorkdayAdd(row, workdayArgs);
   const monthLabelArgs = parseMiddleFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return evaluateMiddleFormulaMonthLabel(row, monthLabelArgs);
   const roundArgs = parseMiddleFormulaFunctionArgs(text, 'round');
@@ -4927,6 +4929,7 @@ function convertWecomFormulaExpression(expression) {
     .replace(/\bIFERROR\s*\(/g, 'iferror(')
     .replace(/\bVALUE\s*\(/g, 'value(')
     .replace(/\bDATEDIF\s*\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*"D"\s*\)/gi, 'days($2,$1)')
+    .replace(/\bWORKDAY\s*\(/gi, 'workdayadd(')
     .replace(/\bTEXT\s*\(\s*([^,]+?)\s*,\s*"yyyy年mm月"\s*\)/gi, 'monthlabel($1)')
     .replace(/\bROUND\s*\(/g, 'round(')
     .replace(/\bTODAY\s*\(\s*\)/g, 'today()')
@@ -5210,9 +5213,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/datedif/today/if/and/or/empty/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/datedif/today/if/and/or/empty/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workday/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
   }
-  if (!/\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workday|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);

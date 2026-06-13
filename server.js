@@ -1992,7 +1992,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workday|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -2182,6 +2182,8 @@ function buildFormulaSqlValue(schemaTable, value) {
   if (dateAddArgs) return buildFormulaSqlDateAdd(schemaTable, dateAddArgs);
   const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
   if (workdayAddArgs) return buildFormulaSqlWorkdayAdd(schemaTable, workdayAddArgs);
+  const workdayArgs = parseFormulaFunctionArgs(text, 'workday');
+  if (workdayArgs) return buildFormulaSqlWorkdayAdd(schemaTable, workdayArgs);
   const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return buildFormulaSqlMonthLabel(schemaTable, monthLabelArgs);
   const roundArgs = parseFormulaFunctionArgs(text, 'round');
@@ -2777,6 +2779,8 @@ function evaluateFormulaValue(schemaTable, expression, row) {
   if (dateAddArgs) return evaluateFormulaDateAdd(schemaTable, dateAddArgs, row);
   const workdayAddArgs = parseFormulaFunctionArgs(text, 'workdayadd');
   if (workdayAddArgs) return evaluateFormulaWorkdayAdd(schemaTable, workdayAddArgs, row);
+  const workdayArgs = parseFormulaFunctionArgs(text, 'workday');
+  if (workdayArgs) return evaluateFormulaWorkdayAdd(schemaTable, workdayArgs, row);
   const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return evaluateFormulaMonthLabel(schemaTable, monthLabelArgs, row);
   const roundArgs = parseFormulaFunctionArgs(text, 'round');
