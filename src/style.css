@@ -1475,6 +1475,8 @@ hr {
 }
 
 .field-option-editor {
+  display: block;
+  width: 100%;
   margin: 8px 0 16px;
 }
 
@@ -1499,6 +1501,9 @@ hr {
 }
 
 .field-option-editor textarea {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   min-height: 240px;
   resize: vertical;
   line-height: 1.7;
