@@ -1984,6 +1984,7 @@ async function saveFormulaColumnConfig(conn, schemaTable, schemaColumn, submitte
 }
 
 function validateFormulaExpressionText(expression) {
+  expression = normalizeFormulaExpressionShorthand(expression);
   if (isAdvancedFormulaExpression(expression)) return;
   const withoutTokens = expression.replace(/\{[^{}]+\}/g, '');
   if (/[^0-9+\-*/().,\s]/.test(withoutTokens)) {
@@ -1992,10 +1993,11 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workday|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workday|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(normalizeFormulaExpressionShorthand(expression));
 }
 
 function extractFormulaDependencies(expression) {
+  expression = normalizeFormulaExpressionShorthand(expression);
   const dependencies = [];
   const seen = new Set();
   const tokenPattern = /\{([^{}]+)\}/g;
@@ -2008,6 +2010,17 @@ function extractFormulaDependencies(expression) {
     dependencies.push(dependency);
   }
   return dependencies;
+}
+
+function normalizeFormulaExpressionShorthand(expression) {
+  let text = String(expression || '').trim();
+  let previous = '';
+  while (text !== previous) {
+    previous = text;
+    text = text.replace(/(\{[^{}]+\})\.round\(\s*([^)]+?)\s*\)/gi, 'round($1,$2)');
+    text = text.replace(/(\{[^{}]+\})\.round\(\s*\)/gi, 'round($1)');
+  }
+  return text;
 }
 
 function parseFormulaToken(token) {
@@ -2139,7 +2152,7 @@ function buildAdvancedFormulaSqlExpression(schemaTable, expression) {
 }
 
 function buildFormulaSqlValue(schemaTable, value) {
-  const text = String(value || '').trim();
+  const text = normalizeFormulaExpressionShorthand(value);
   const ifArgs = parseFormulaFunctionArgs(text, 'if');
   if (ifArgs) {
     if (ifArgs.length !== 3) throw new Error(`公式 if 参数数量无效：${value}`);
@@ -2734,7 +2747,7 @@ function evaluateAdvancedFormulaExpression(schemaTable, expression, row) {
 }
 
 function evaluateFormulaValue(schemaTable, expression, row) {
-  const text = String(expression || '').trim();
+  const text = normalizeFormulaExpressionShorthand(expression);
   const ifArgs = parseFormulaFunctionArgs(text, 'if');
   if (ifArgs) {
     if (ifArgs.length !== 3) return '';

@@ -3391,7 +3391,7 @@ function calculateAdvancedMiddleFormulaValue(row, expression) {
 }
 
 function evaluateMiddleFormulaValue(row, expression) {
-  const text = String(expression || '').trim();
+  const text = normalizeFormulaExpressionShorthand(expression);
   const ifArgs = parseMiddleFormulaFunctionArgs(text, 'if');
   if (ifArgs) {
     if (ifArgs.length !== 3) return '';
@@ -4903,7 +4903,7 @@ function convertCurrentWecomFormula() {
 }
 
 function convertWecomFormulaExpression(expression) {
-  let text = String(expression || '').trim();
+  let text = normalizeFormulaExpressionShorthand(expression);
   if (!text) throw new Error('请先粘贴企业微信公式');
   text = text
     .replace(/[“”]/g, '"')
@@ -4938,6 +4938,17 @@ function convertWecomFormulaExpression(expression) {
   text = convertWecomConcatExpression(text);
   text = convertWecomDateComparisons(text);
   text = convertWecomEqualityConditions(text);
+  return text;
+}
+
+function normalizeFormulaExpressionShorthand(expression) {
+  let text = String(expression || '').trim();
+  let previous = '';
+  while (text !== previous) {
+    previous = text;
+    text = text.replace(/(\{[^{}]+\})\.round\(\s*([^)]+?)\s*\)/gi, 'round($1,$2)');
+    text = text.replace(/(\{[^{}]+\})\.round\(\s*\)/gi, 'round($1)');
+  }
   return text;
 }
 
@@ -5186,6 +5197,7 @@ function applyFormulaConfig() {
 }
 
 function validateFormulaExpression(expression) {
+  expression = normalizeFormulaExpressionShorthand(expression);
   if (isAdvancedMiddleFormulaExpression(expression)) {
     return validateAdvancedFormulaExpression(expression);
   }
@@ -5208,7 +5220,7 @@ function validateFormulaExpression(expression) {
 }
 
 function validateAdvancedFormulaExpression(expression) {
-  const text = String(expression || '').trim();
+  const text = normalizeFormulaExpressionShorthand(expression);
   const allowedText = text
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
@@ -5233,6 +5245,7 @@ function validateAdvancedFormulaExpression(expression) {
 }
 
 function extractFormulaExpressionTokens(expression) {
+  expression = normalizeFormulaExpressionShorthand(expression);
   const tokens = [];
   const pattern = /\{([^{}]+)\}/g;
   let match;
