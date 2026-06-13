@@ -1581,9 +1581,11 @@
 	        <span>支持数字、括号、加减乘除。</span>
 	        <span>本表字段格式：{this.字段名}</span>
 	        <span>其他表字段格式：{表名.字段名.取值方式}</span>
+	        <span>可粘贴企业微信公式后转换。</span>
 	      </div>
 
 	      <div class="modal-footer">
+	        <button class="secondary" type="button" @click="convertCurrentWecomFormula">转换企业微信公式</button>
 	        <button type="button" @click="applyFormulaConfig">保存公式配置</button>
 	        <button class="secondary" type="button" @click="resetFormulaConfig">恢复当前值</button>
 	        <button class="secondary" type="button" @click="clearFormulaConfig">清除公式</button>
@@ -4768,6 +4770,89 @@ function insertForeignFormulaField() {
   appendFormulaToken(`{${formulaConfig.foreignTableName}.${formulaConfig.foreignColumnKey}.${formulaConfig.aggregate || 'sum'}}`);
 }
 
+function looksLikeWecomFormula(expression) {
+  const text = String(expression || '');
+  return /\[[^\]]+\]/.test(text)
+    || /\bIF\s*\(/.test(text)
+    || /\bTEXT\s*\(/.test(text)
+    || /\.ISBLANK\s*\(/i.test(text)
+    || /\bTODAY\s*\(/.test(text);
+}
+
+function convertCurrentWecomFormula() {
+  try {
+    formulaConfig.expression = convertWecomFormulaExpression(formulaConfig.expression);
+    tableConfigStatusText.value = '企业微信公式已转换，确认无误后点击保存配置';
+    tableConfigErrorText.value = '';
+  } catch (error) {
+    tableConfigErrorText.value = error?.message || String(error);
+  }
+}
+
+function convertWecomFormulaExpression(expression) {
+  let text = String(expression || '').trim();
+  if (!text) throw new Error('请先粘贴企业微信公式');
+  text = text
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/，/g, ',');
+
+  const currentTable = tableConfigItems.value.find(item => item.tableName === formulaConfig.tableName);
+  const fieldMap = new Map();
+  for (const column of currentTable?.columns || []) {
+    const aliases = [
+      column.label,
+      column.key,
+      String(column.label || '').replace(/\s+/g, ''),
+      String(column.key || '').replace(/\s+/g, '')
+    ];
+    for (const alias of aliases) {
+      const key = normalizeWecomFormulaFieldName(alias);
+      if (key && !fieldMap.has(key)) fieldMap.set(key, column.key);
+    }
+  }
+
+  text = text.replace(/\[([^\]]+)\]/g, (_, rawName) => {
+    const normalizedName = normalizeWecomFormulaFieldName(rawName);
+    const columnKey = fieldMap.get(normalizedName);
+    if (!columnKey) throw new Error(`企业微信公式字段未匹配到数据库字段：${String(rawName).trim()}`);
+    return `{this.${columnKey}}`;
+  });
+
+  text = text
+    .replace(/(\{this\.[^{}]+\})\s*\.\s*ISBLANK\s*\(\s*\)/gi, 'empty($1)')
+    .replace(/\bTEXT\s*\(\s*([^,]+?)\s*,\s*"yyyy年mm月"\s*\)/gi, 'monthlabel($1)')
+    .replace(/\bTODAY\s*\(\s*\)/g, 'today()')
+    .replace(/\bIF\s*\(/g, 'if(');
+
+  text = convertWecomDateComparisons(text);
+  text = convertWecomEqualityConditions(text);
+  return text;
+}
+
+function normalizeWecomFormulaFieldName(value) {
+  return String(value || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function convertWecomDateComparisons(expression) {
+  return String(expression || '')
+    .replace(/today\(\)\s*>=\s*(\{this\.[^{}]+\})/gi, 'days(today(),$1)>=0')
+    .replace(/today\(\)\s*>\s*(\{this\.[^{}]+\})/gi, 'days(today(),$1)>0')
+    .replace(/today\(\)\s*<=\s*(\{this\.[^{}]+\})/gi, 'days($1,today())>=0')
+    .replace(/today\(\)\s*<\s*(\{this\.[^{}]+\})/gi, 'days($1,today())>0')
+    .replace(/(\{this\.[^{}]+\})\s*>=\s*today\(\)/gi, 'days($1,today())>=0')
+    .replace(/(\{this\.[^{}]+\})\s*>\s*today\(\)/gi, 'days($1,today())>0')
+    .replace(/(\{this\.[^{}]+\})\s*<=\s*today\(\)/gi, 'days(today(),$1)>=0')
+    .replace(/(\{this\.[^{}]+\})\s*<\s*today\(\)/gi, 'days(today(),$1)>0');
+}
+
+function convertWecomEqualityConditions(expression) {
+  return String(expression || '').replace(
+    /(\{this\.[^{}]+\}|empty\([^)]+\)|monthlabel\([^)]+\)|today\(\)|"[^"]*"|-?\d+(?:\.\d+)?)\s*=\s*("[^"]*"|\{this\.[^{}]+\}|-?\d+(?:\.\d+)?)/g,
+    'eq($1,$2)'
+  );
+}
+
 function applyFormulaConfig() {
   const table = tableConfigItems.value.find(item => item.tableName === formulaConfig.tableName);
   const column = table?.columns?.find(item => item.key === formulaConfig.columnKey);
@@ -4776,7 +4861,16 @@ function applyFormulaConfig() {
     return;
   }
 
-  const expression = formulaConfig.expression.trim();
+  let expression = formulaConfig.expression.trim();
+  if (expression && looksLikeWecomFormula(expression)) {
+    try {
+      expression = convertWecomFormulaExpression(expression);
+      formulaConfig.expression = expression;
+    } catch (error) {
+      tableConfigErrorText.value = error?.message || String(error);
+      return;
+    }
+  }
   if (!expression) {
     column.formulaConfig = { expression: '', dependencies: [], isEnabled: false };
   } else {
