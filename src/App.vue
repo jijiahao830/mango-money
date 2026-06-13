@@ -1068,7 +1068,7 @@
             </div>
 
             <div class="field-picker-grid">
-              <label v-for="column in selectedTableConfigVisibleColumns" :key="column.key" class="field-check">
+              <div v-for="column in selectedTableConfigVisibleColumns" :key="column.key" class="field-check">
                 <input
                   :checked="selectedTableConfig.visibleFields.includes(column.key)"
                   type="checkbox"
@@ -1106,7 +1106,7 @@
 	                    配置
 	                  </button>
 	                </span>
-	              </label>
+	              </div>
             </div>
 
             <div class="form-actions">
@@ -3380,7 +3380,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3416,6 +3416,17 @@ function evaluateMiddleFormulaValue(row, expression) {
   if (workdayAddArgs) return evaluateMiddleFormulaWorkdayAdd(row, workdayAddArgs);
   const monthLabelArgs = parseMiddleFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return evaluateMiddleFormulaMonthLabel(row, monthLabelArgs);
+  const roundArgs = parseMiddleFormulaFunctionArgs(text, 'round');
+  if (roundArgs) {
+    if (roundArgs.length < 1 || roundArgs.length > 2) return '';
+    const value = Number(evaluateMiddleFormulaValue(row, roundArgs[0]));
+    const digits = roundArgs.length === 2 ? Number(evaluateMiddleFormulaValue(row, roundArgs[1])) : 0;
+    if (!Number.isFinite(value) || !Number.isFinite(digits)) return '';
+    const factor = 10 ** Math.trunc(digits);
+    return Math.round(value * factor) / factor;
+  }
+  const concatArgs = parseMiddleFormulaFunctionArgs(text, 'concat');
+  if (concatArgs) return concatArgs.map(arg => String(evaluateMiddleFormulaValue(row, arg))).join('');
   const maxArgs = parseMiddleFormulaFunctionArgs(text, 'max');
   if (maxArgs) {
     const values = maxArgs.map(arg => Number(evaluateMiddleFormulaValue(row, arg)));
@@ -4798,19 +4809,10 @@ function convertWecomFormulaExpression(expression) {
     .replace(/，/g, ',');
 
   const currentTable = tableConfigItems.value.find(item => item.tableName === formulaConfig.tableName);
-  const fieldMap = new Map();
-  for (const column of currentTable?.columns || []) {
-    const aliases = [
-      column.label,
-      column.key,
-      String(column.label || '').replace(/\s+/g, ''),
-      String(column.key || '').replace(/\s+/g, '')
-    ];
-    for (const alias of aliases) {
-      const key = normalizeWecomFormulaFieldName(alias);
-      if (key && !fieldMap.has(key)) fieldMap.set(key, column.key);
-    }
-  }
+  const fieldMap = createWecomFieldMap(currentTable);
+
+  const filterAggregateExpression = convertWecomFilterAggregateExpression(text, currentTable, fieldMap);
+  if (filterAggregateExpression) return filterAggregateExpression;
 
   text = text.replace(/\[([^\]]+)\]/g, (_, rawName) => {
     const normalizedName = normalizeWecomFormulaFieldName(rawName);
@@ -4822,16 +4824,201 @@ function convertWecomFormulaExpression(expression) {
   text = text
     .replace(/(\{this\.[^{}]+\})\s*\.\s*ISBLANK\s*\(\s*\)/gi, 'empty($1)')
     .replace(/\bTEXT\s*\(\s*([^,]+?)\s*,\s*"yyyy年mm月"\s*\)/gi, 'monthlabel($1)')
+    .replace(/\bROUND\s*\(/g, 'round(')
     .replace(/\bTODAY\s*\(\s*\)/g, 'today()')
     .replace(/\bIF\s*\(/g, 'if(');
 
+  text = convertWecomConcatExpression(text);
   text = convertWecomDateComparisons(text);
   text = convertWecomEqualityConditions(text);
   return text;
 }
 
+function createWecomFieldMap(table) {
+  const fieldMap = new Map();
+  for (const column of table?.columns || []) {
+    const aliases = [
+      column.label,
+      column.key,
+      String(column.label || '').replace(/\s+/g, ''),
+      String(column.key || '').replace(/\s+/g, '')
+    ];
+    for (const alias of aliases) {
+      const key = normalizeWecomFormulaFieldName(alias);
+      if (key && !fieldMap.has(key)) fieldMap.set(key, column.key);
+    }
+  }
+  return fieldMap;
+}
+
+function resolveWecomFormulaTable(rawName) {
+  const normalizedName = normalizeWecomFormulaFieldName(rawName);
+  const tableAliases = tableConfigItems.value.map(table => ({
+    table,
+    aliases: [
+      table.tableLabel,
+      table.tableName,
+      String(table.tableLabel || '').replace(/\s+/g, ''),
+      String(table.tableName || '').replace(/\s+/g, '')
+    ].map(normalizeWecomFormulaFieldName).filter(Boolean)
+  }));
+  const exactMatch = tableAliases.find(item => item.aliases.includes(normalizedName));
+  if (exactMatch) return exactMatch.table;
+  const fuzzyMatch = tableAliases.find(item =>
+    item.aliases.some(alias => alias && (normalizedName.includes(alias) || alias.includes(normalizedName)))
+  );
+  return fuzzyMatch?.table || null;
+}
+
+function resolveWecomFormulaColumn(table, rawName) {
+  const fieldMap = createWecomFieldMap(table);
+  const columnKey = fieldMap.get(normalizeWecomFormulaFieldName(rawName));
+  if (!columnKey) throw new Error(`企业微信公式字段未匹配到数据库字段：${String(rawName).trim()}`);
+  return columnKey;
+}
+
+function convertWecomFilterAggregateExpression(expression, currentTable, currentFieldMap) {
+  const match = String(expression || '').match(/^\[([^\]]+)\](.+)\.\[([^\]]+)\]\s*\.LISTCOMBINE\s*\(\s*\)\s*\.\s*(SUM|AVERAGE|AVG|MAX|MIN|COUNT)\s*\(\s*\)$/i);
+  if (!match) return '';
+  const sourceTable = resolveWecomFormulaTable(match[1]);
+  if (!sourceTable) throw new Error(`企业微信公式表未匹配到数据库表：${String(match[1]).trim()}`);
+  const filters = extractWecomFilterConditions(match[2]);
+  if (!filters.length) throw new Error('企业微信公式 FILTER 条件为空，无法转换');
+  const sourceFieldMap = createWecomFieldMap(sourceTable);
+  const conditionParts = [];
+  for (const filter of filters) {
+    const condition = parseWecomFilterCondition(filter, sourceTable, sourceFieldMap, currentFieldMap);
+    if (!condition.currentColumnKey) throw new Error(`企业微信公式本表字段未匹配到数据库字段：${condition.currentRawName}`);
+    conditionParts.push(`${sourceTable.tableName}.${condition.sourceColumnKey}`, `"${condition.operator}"`, `{this.${condition.currentColumnKey}}`);
+  }
+  const resultColumnKey = resolveWecomFormulaColumn(sourceTable, match[3]);
+  const aggregate = match[4].toLowerCase();
+  if (aggregate === 'count') return `countif(${conditionParts.join(',')})`;
+  const functionName = aggregate === 'avg' || aggregate === 'average'
+    ? 'avgif'
+    : aggregate === 'max'
+      ? 'maxif'
+      : aggregate === 'min'
+        ? 'minif'
+        : 'sumif';
+  return `${functionName}(${conditionParts.join(',')},${sourceTable.tableName}.${resultColumnKey})`;
+}
+
+function extractWecomFilterConditions(source) {
+  const filters = [];
+  let index = 0;
+  const text = String(source || '').trim();
+  while (index < text.length) {
+    const prefix = text.slice(index).match(/^\.FILTER\s*\(/i);
+    if (!prefix) break;
+    index += prefix[0].length;
+    const start = index;
+    let depth = 1;
+    while (index < text.length && depth > 0) {
+      const char = text[index];
+      if (char === '(') depth += 1;
+      if (char === ')') depth -= 1;
+      index += 1;
+    }
+    if (depth !== 0) throw new Error('企业微信公式 FILTER 括号不完整');
+    filters.push(text.slice(start, index - 1).trim());
+  }
+  return filters;
+}
+
+function parseWecomFilterCondition(filter, sourceTable, sourceFieldMap, currentFieldMap) {
+  const monthMatch = String(filter || '').match(/^\[Each\]\.\[([^\]]+)\]\s*\.MONTH\s*\(\s*\)\s*=\s*\[([^\]]+)\]\s*\.MONTH\s*\(\s*\)$/i);
+  if (monthMatch) {
+    return {
+      sourceColumnKey: sourceFieldMap.get(normalizeWecomFormulaFieldName(monthMatch[1])) || resolveWecomFormulaColumn(sourceTable, monthMatch[1]),
+      operator: 'monthEq',
+      currentColumnKey: currentFieldMap.get(normalizeWecomFormulaFieldName(monthMatch[2])),
+      currentRawName: monthMatch[2]
+    };
+  }
+  const compareMatch = String(filter || '').match(/^\[Each\]\.\[([^\]]+)\]\s*(<=|>=|<>|!=|=|<|>)\s*\[([^\]]+)\]$/);
+  if (compareMatch) {
+    const operatorMap = {
+      '<=': 'lte',
+      '>=': 'gte',
+      '<': 'lt',
+      '>': 'gt',
+      '=': 'eq',
+      '!=': 'ne',
+      '<>': 'ne'
+    };
+    return {
+      sourceColumnKey: sourceFieldMap.get(normalizeWecomFormulaFieldName(compareMatch[1])) || resolveWecomFormulaColumn(sourceTable, compareMatch[1]),
+      operator: operatorMap[compareMatch[2]] || 'eq',
+      currentColumnKey: currentFieldMap.get(normalizeWecomFormulaFieldName(compareMatch[3])),
+      currentRawName: compareMatch[3]
+    };
+  }
+  throw new Error(`暂不支持转换这个 FILTER 条件：${filter}`);
+}
+
 function normalizeWecomFormulaFieldName(value) {
   return String(value || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function convertWecomConcatExpression(expression) {
+  const text = String(expression || '').trim();
+  const concatIndex = findTopLevelFormulaOperator(text, '&');
+  if (concatIndex < 0) {
+    const functionMatch = text.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\((.*)\)$/);
+    if (!functionMatch || !isFormulaFunctionWrappingEntireText(text, functionMatch[1])) return text;
+    const args = splitMiddleFormulaArguments(functionMatch[2]);
+    return `${functionMatch[1]}(${args.map(arg => convertWecomConcatExpression(arg)).join(',')})`;
+  }
+  const left = text.slice(0, concatIndex).trim();
+  const right = text.slice(concatIndex + 1).trim();
+  return `concat(${convertWecomConcatExpression(left)},${convertWecomConcatExpression(right)})`;
+}
+
+function isFormulaFunctionWrappingEntireText(expression, functionName) {
+  const text = String(expression || '').trim();
+  const prefix = `${functionName}(`;
+  if (!text.toLowerCase().startsWith(prefix.toLowerCase()) || !text.endsWith(')')) return false;
+  let depth = 0;
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0 && index !== text.length - 1) return false;
+    }
+  }
+  return depth === 0;
+}
+
+function findTopLevelFormulaOperator(expression, operator) {
+  const text = String(expression || '');
+  let depth = 0;
+  let quote = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (quote) {
+      if (char === quote) quote = '';
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (depth === 0 && char === operator) return index;
+  }
+  return -1;
 }
 
 function convertWecomDateComparisons(expression) {
@@ -4919,9 +5106,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);

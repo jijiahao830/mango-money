@@ -1986,7 +1986,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -2165,6 +2165,10 @@ function buildFormulaSqlValue(schemaTable, value) {
   if (workdayAddArgs) return buildFormulaSqlWorkdayAdd(schemaTable, workdayAddArgs);
   const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return buildFormulaSqlMonthLabel(schemaTable, monthLabelArgs);
+  const roundArgs = parseFormulaFunctionArgs(text, 'round');
+  if (roundArgs) return buildFormulaSqlRound(schemaTable, roundArgs);
+  const concatArgs = parseFormulaFunctionArgs(text, 'concat');
+  if (concatArgs) return buildFormulaSqlConcat(schemaTable, concatArgs);
   const maxArgs = parseFormulaFunctionArgs(text, 'max');
   if (maxArgs) {
     if (maxArgs.length < 2) throw new Error('max 至少需要两个参数');
@@ -2279,7 +2283,7 @@ function buildFormulaSqlIfConditions(schemaTable, expectedTableName, args) {
 
 function parseFormulaConditionOperator(value) {
   const text = String(value || '').trim().replace(/^"|"$/g, '');
-  return ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty'].includes(text) ? text : '';
+  return ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty', 'lt', 'lte', 'gt', 'gte', 'monthEq'].includes(text) ? text : '';
 }
 
 function buildFormulaSqlFieldCondition(schemaTable, columnName, operator, compareArg) {
@@ -2299,6 +2303,21 @@ function buildFormulaSqlFieldCondition(schemaTable, columnName, operator, compar
   }
   if (operator === 'ne') {
     return `(${columnSql} IS NULL OR ${columnSql} <> ${compareSql})`;
+  }
+  if (operator === 'lt') {
+    return `${columnSql} < ${compareSql}`;
+  }
+  if (operator === 'lte') {
+    return `${columnSql} <= ${compareSql}`;
+  }
+  if (operator === 'gt') {
+    return `${columnSql} > ${compareSql}`;
+  }
+  if (operator === 'gte') {
+    return `${columnSql} >= ${compareSql}`;
+  }
+  if (operator === 'monthEq') {
+    return `MONTH(${columnSql}) = MONTH(${compareSql})`;
   }
   return `${columnSql} = ${compareSql}`;
 }
@@ -2343,6 +2362,18 @@ function buildFormulaSqlWorkdayAdd(schemaTable, args) {
 function buildFormulaSqlMonthLabel(schemaTable, args) {
   if (args.length !== 1) throw new Error('monthlabel 参数格式应为：monthlabel(日期)');
   return `DATE_FORMAT(${buildFormulaSqlDateArg(schemaTable, args[0])}, '%Y年%m月')`;
+}
+
+function buildFormulaSqlRound(schemaTable, args) {
+  if (args.length < 1 || args.length > 2) throw new Error('round 参数格式应为：round(数值, 小数位)');
+  const digits = args.length === 2 ? Number(String(args[1] || '').trim()) : 0;
+  if (!Number.isFinite(digits)) throw new Error(`round 小数位无效：${args[1]}`);
+  return `ROUND(${buildFormulaSqlValue(schemaTable, args[0])}, ${Math.trunc(digits)})`;
+}
+
+function buildFormulaSqlConcat(schemaTable, args) {
+  if (!args.length) throw new Error('concat 至少需要一个参数');
+  return `CONCAT(${args.map(arg => buildFormulaSqlValue(schemaTable, arg)).join(', ')})`;
 }
 
 function buildFormulaSqlNumericExpression(schemaTable, expression) {
@@ -2596,6 +2627,17 @@ function evaluateFormulaValue(schemaTable, expression, row) {
   if (workdayAddArgs) return evaluateFormulaWorkdayAdd(schemaTable, workdayAddArgs, row);
   const monthLabelArgs = parseFormulaFunctionArgs(text, 'monthlabel');
   if (monthLabelArgs) return evaluateFormulaMonthLabel(schemaTable, monthLabelArgs, row);
+  const roundArgs = parseFormulaFunctionArgs(text, 'round');
+  if (roundArgs) {
+    if (roundArgs.length < 1 || roundArgs.length > 2) return '';
+    const value = Number(evaluateFormulaValue(schemaTable, roundArgs[0], row));
+    const digits = roundArgs.length === 2 ? Number(evaluateFormulaValue(schemaTable, roundArgs[1], row)) : 0;
+    if (!Number.isFinite(value) || !Number.isFinite(digits)) return '';
+    const factor = 10 ** Math.trunc(digits);
+    return Math.round(value * factor) / factor;
+  }
+  const concatArgs = parseFormulaFunctionArgs(text, 'concat');
+  if (concatArgs) return concatArgs.map(arg => String(evaluateFormulaValue(schemaTable, arg, row))).join('');
   const maxArgs = parseFormulaFunctionArgs(text, 'max');
   if (maxArgs) {
     const values = maxArgs.map(arg => Number(evaluateFormulaValue(schemaTable, arg, row)));
