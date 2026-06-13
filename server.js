@@ -2586,12 +2586,37 @@ function buildFormulaSqlCondition(schemaTable, condition) {
   const eqArgs = parseFormulaFunctionArgs(condition, 'eq');
   if (eqArgs) {
     if (eqArgs.length !== 2) throw new Error(`公式 eq 参数数量无效：${condition}`);
+    const leftEmptyCondition = buildFormulaSqlEmptyCompareCondition(schemaTable, eqArgs[0], eqArgs[1]);
+    if (leftEmptyCondition) return leftEmptyCondition;
+    const rightEmptyCondition = buildFormulaSqlEmptyCompareCondition(schemaTable, eqArgs[1], eqArgs[0]);
+    if (rightEmptyCondition) return rightEmptyCondition;
     return `${buildFormulaSqlRawArg(schemaTable, eqArgs[0])} = ${buildFormulaSqlRawArg(schemaTable, eqArgs[1])}`;
   }
   const match = String(condition || '').trim().match(/^(.+?)\s*(>=|<=|==|=|>|<)\s*(-?\d+(?:\.\d+)?)$/);
   if (!match) throw new Error(`公式条件格式无效：${condition}`);
   const operator = match[2] === '==' ? '=' : match[2];
   return `${buildFormulaSqlNumericExpression(schemaTable, match[1])} ${operator} ${Number(match[3])}`;
+}
+
+function buildFormulaSqlEmptyCompareCondition(schemaTable, fieldArg, emptyArg) {
+  if (!isFormulaEmptyStringArg(emptyArg)) return '';
+  const column = getFormulaTokenColumn(schemaTable, fieldArg);
+  if (!column) return '';
+  const columnSql = `base.${escapeIdentifier(column.key)}`;
+  return `(${columnSql} IS NULL OR CAST(${columnSql} AS CHAR) = '')`;
+}
+
+function isFormulaEmptyStringArg(value) {
+  const match = String(value || '').trim().match(/^"([^"]*)"$/);
+  return Boolean(match && match[1] === '');
+}
+
+function getFormulaTokenColumn(schemaTable, value) {
+  const tokenMatch = String(value || '').trim().match(/^\{([^{}]+)\}$/);
+  if (!tokenMatch) return null;
+  const dependency = parseFormulaToken(tokenMatch[1]);
+  if (dependency.scope !== 'current') return null;
+  return schemaTable.columns.find(column => column.key === dependency.columnName) || null;
 }
 
 function buildFormulaSqlRawArg(schemaTable, value) {
@@ -2644,10 +2669,14 @@ function buildFormulaSqlDateArg(schemaTable, value) {
     if (dependency.scope !== 'current' || !schemaTable.columns.some(column => column.key === dependency.columnName)) {
       throw new Error(`公式引用了不存在的本表字段：${tokenMatch[1]}`);
     }
-    return `base.${escapeIdentifier(dependency.columnName)}`;
+    return normalizeFormulaSqlDateValue(`base.${escapeIdentifier(dependency.columnName)}`);
   }
   if (/^-?\d+(?:\.\d+)?$/.test(text)) return String(Number(text));
   throw new Error(`公式参数格式无效：${value}`);
+}
+
+function normalizeFormulaSqlDateValue(valueSql) {
+  return `NULLIF(NULLIF(NULLIF(CAST(${valueSql} AS CHAR), ''), '0000-00-00'), '0000-00-00 00:00:00')`;
 }
 
 function sqlStringLiteral(value) {
@@ -3463,13 +3492,18 @@ function formatMiddleDisplaySelectColumn(column, viewColumns = new Set(), primar
   const name = escapeIdentifier(column.key);
   const baseValue = `base.${name}`;
   const canUseViewValue = viewColumns.has(column.key) && column.key !== primaryKeyColumn?.key;
+  if (['date', 'datetime', 'timestamp'].includes(column.dataType)) {
+    const format = column.dataType === 'date' ? '%Y-%m-%d' : '%Y-%m-%d %H:%i:%s';
+    const normalizeDateText = value => `NULLIF(NULLIF(CAST(${value} AS CHAR), ''), '0000-00-00 00:00:00')`;
+    const baseDateText = normalizeDateText(baseValue);
+    const valueExpression = canUseViewValue
+      ? `COALESCE(${baseDateText}, NULLIF(${normalizeDateText(`formula_view.${name}`)}, '0000-00-00'))`
+      : baseDateText;
+    return `DATE_FORMAT(${valueExpression}, '${format}') AS ${name}`;
+  }
   const valueExpression = canUseViewValue
     ? `IF(${baseValue} IS NULL OR CAST(${baseValue} AS CHAR) = '', formula_view.${name}, ${baseValue})`
     : baseValue;
-  if (['date', 'datetime', 'timestamp'].includes(column.dataType)) {
-    const format = column.dataType === 'date' ? '%Y-%m-%d' : '%Y-%m-%d %H:%i:%s';
-    return `DATE_FORMAT(NULLIF(CAST(${valueExpression} AS CHAR), ''), '${format}') AS ${name}`;
-  }
   return `${valueExpression} AS ${name}`;
 }
 

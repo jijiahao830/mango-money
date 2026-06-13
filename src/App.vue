@@ -4937,6 +4937,7 @@ function convertWecomFormulaExpression(expression) {
 
   text = convertWecomConcatExpression(text);
   text = convertWecomDateComparisons(text);
+  text = convertWecomEmptyEqualityConditions(text);
   text = convertWecomEqualityConditions(text);
   return text;
 }
@@ -5158,6 +5159,12 @@ function convertWecomDateComparisons(expression) {
     .replace(/(\{this\.[^{}]+\})\s*>\s*today\(\)/gi, 'days($1,today())>0')
     .replace(/(\{this\.[^{}]+\})\s*<=\s*today\(\)/gi, 'days(today(),$1)>=0')
     .replace(/(\{this\.[^{}]+\})\s*<\s*today\(\)/gi, 'days(today(),$1)>0');
+}
+
+function convertWecomEmptyEqualityConditions(expression) {
+  return String(expression || '')
+    .replace(/(\{this\.[^{}]+\})\s*(?:==|=)\s*""/g, 'empty($1)')
+    .replace(/""\s*(?:==|=)\s*(\{this\.[^{}]+\})/g, 'empty($1)');
 }
 
 function convertWecomEqualityConditions(expression) {
