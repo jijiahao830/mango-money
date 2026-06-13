@@ -1517,6 +1517,19 @@ hr {
   margin: 10px 0;
 }
 
+.field-option-modal:not(.formula-config-modal) > .formula-builder-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.field-option-modal:not(.formula-config-modal) > .formula-builder-grid label {
+  min-width: 0;
+}
+
+.field-option-modal:not(.formula-config-modal) > .formula-builder-grid label span {
+  white-space: nowrap;
+}
+
 .formula-builder-grid-wide {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px auto;
 }
@@ -1581,6 +1594,7 @@ hr {
 }
 
 @media (max-width: 680px) {
+  .field-option-modal:not(.formula-config-modal) > .formula-builder-grid,
   .field-lookup-config > .formula-builder-grid,
   .lookup-condition-grid {
     grid-template-columns: 1fr;
