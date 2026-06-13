@@ -3380,7 +3380,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3524,6 +3524,16 @@ function evaluateMiddleFormulaNumericExpression(row, expression) {
 }
 
 function evaluateMiddleFormulaCondition(row, condition) {
+  const andArgs = parseMiddleFormulaFunctionArgs(condition, 'and');
+  if (andArgs) {
+    if (!andArgs.length) return false;
+    return andArgs.every(arg => evaluateMiddleFormulaCondition(row, arg));
+  }
+  const orArgs = parseMiddleFormulaFunctionArgs(condition, 'or');
+  if (orArgs) {
+    if (!orArgs.length) return false;
+    return orArgs.some(arg => evaluateMiddleFormulaCondition(row, arg));
+  }
   const emptyArgs = parseMiddleFormulaFunctionArgs(condition, 'empty');
   if (emptyArgs) {
     if (emptyArgs.length !== 1) return false;
@@ -4355,6 +4365,12 @@ function applyTablePropertyConfig() {
     const property = table.fieldProperties[column.key];
     if (!property) continue;
     column.showFieldKindTag = property.tagged === true;
+    if (!property.tagged) {
+      column.fieldKind = '';
+      column.formulaConfig = { expression: '', dependencies: [], isEnabled: false };
+      column.optionConfig = null;
+      continue;
+    }
     if (property.tagged && !defaultShouldShowFieldKindTag(column)) {
       column.fieldKind = 'relation';
     }
@@ -4418,11 +4434,11 @@ function getFieldKindLabel(column) {
 }
 
 function shouldShowFormulaButton(column) {
-  return getFieldKind(column) === 'calc' && isTableConfigFormulaCandidate(column);
+  return shouldShowFieldKindTag(column) && getFieldKind(column) === 'calc' && isTableConfigFormulaCandidate(column);
 }
 
 function shouldShowFieldOptionButton(column) {
-  return ['single', 'multi', 'relation'].includes(getFieldKind(column));
+  return shouldShowFieldKindTag(column) && ['single', 'multi', 'relation'].includes(getFieldKind(column));
 }
 
 function openFieldKindMenu(table, column, event) {
@@ -5131,9 +5147,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/if/and/or/empty/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);

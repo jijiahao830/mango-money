@@ -974,6 +974,12 @@ async function saveTableManagementConfig(payload) {
       for (const column of submittedColumns) {
         const schemaColumn = schemaColumnsByKey.get(String(column.key || ''));
         if (!schemaColumn) continue;
+        const property = fieldProperties[schemaColumn.key];
+        const isTaggedField = property?.tagged === true;
+        if (!isTaggedField) {
+          await deleteFieldConfigs(conn, schemaTable.tableName, schemaColumn.key);
+          continue;
+        }
         const inferredFieldKind = normalizeFieldKind(column.fieldKind) || inferFieldKind(schemaColumn);
         const submittedFieldKind = shouldPersistFieldKind(inferredFieldKind) ? inferredFieldKind : '';
 
@@ -1986,7 +1992,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -2409,6 +2415,16 @@ function buildFormulaSqlNumericExpression(schemaTable, expression) {
 }
 
 function buildFormulaSqlCondition(schemaTable, condition) {
+  const andArgs = parseFormulaFunctionArgs(condition, 'and');
+  if (andArgs) {
+    if (!andArgs.length) throw new Error(`公式 and 参数数量无效：${condition}`);
+    return `(${andArgs.map(arg => buildFormulaSqlCondition(schemaTable, arg)).join(' AND ')})`;
+  }
+  const orArgs = parseFormulaFunctionArgs(condition, 'or');
+  if (orArgs) {
+    if (!orArgs.length) throw new Error(`公式 or 参数数量无效：${condition}`);
+    return `(${orArgs.map(arg => buildFormulaSqlCondition(schemaTable, arg)).join(' OR ')})`;
+  }
   const emptyArgs = parseFormulaFunctionArgs(condition, 'empty');
   if (emptyArgs) {
     if (emptyArgs.length !== 1) throw new Error(`公式 empty 参数数量无效：${condition}`);
@@ -2754,6 +2770,16 @@ function evaluateFormulaNumericExpression(schemaTable, expression, row) {
 }
 
 function evaluateFormulaCondition(schemaTable, condition, row) {
+  const andArgs = parseFormulaFunctionArgs(condition, 'and');
+  if (andArgs) {
+    if (!andArgs.length) return false;
+    return andArgs.every(arg => evaluateFormulaCondition(schemaTable, arg, row));
+  }
+  const orArgs = parseFormulaFunctionArgs(condition, 'or');
+  if (orArgs) {
+    if (!orArgs.length) return false;
+    return orArgs.some(arg => evaluateFormulaCondition(schemaTable, arg, row));
+  }
   const emptyArgs = parseFormulaFunctionArgs(condition, 'empty');
   if (emptyArgs) {
     if (emptyArgs.length !== 1) return false;
@@ -3023,6 +3049,17 @@ async function saveFieldKindOnlyConfig(conn, tableName, columnName, fieldKind) {
     ON DUPLICATE KEY UPDATE
       field_kind = VALUES(field_kind)`,
     [tableName, columnName, fieldKind]
+  );
+}
+
+async function deleteFieldConfigs(conn, tableName, columnName) {
+  await conn.execute(
+    `DELETE FROM cw_field_option_config WHERE table_name = ? AND column_name = ?`,
+    [tableName, columnName]
+  );
+  await conn.execute(
+    `DELETE FROM cw_formula_field_config WHERE table_name = ? AND column_name = ?`,
+    [tableName, columnName]
   );
 }
 
