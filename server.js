@@ -1992,7 +1992,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -2473,6 +2473,13 @@ function buildFormulaSqlTerm(schemaTable, term) {
     if (daysArgs.length !== 2) throw new Error(`公式 days 参数数量无效：${term}`);
     return `DATEDIFF(${buildFormulaSqlDateArg(schemaTable, daysArgs[0])}, ${buildFormulaSqlDateArg(schemaTable, daysArgs[1])})`;
   }
+  const datedIfArgs = parseFormulaFunctionArgs(text, 'datedif');
+  if (datedIfArgs) {
+    if (datedIfArgs.length !== 3) throw new Error(`公式 datedif 参数数量无效：${term}`);
+    const unit = String(datedIfArgs[2] || '').trim().replace(/^"|"$/g, '').toUpperCase();
+    if (unit !== 'D') throw new Error(`公式 datedif 目前只支持 "D"：${term}`);
+    return `DATEDIFF(${buildFormulaSqlDateArg(schemaTable, datedIfArgs[1])}, ${buildFormulaSqlDateArg(schemaTable, datedIfArgs[0])})`;
+  }
   return buildFormulaSqlDateArg(schemaTable, text);
 }
 
@@ -2826,6 +2833,16 @@ function evaluateFormulaTerm(schemaTable, term, row) {
     const endDate = evaluateFormulaDateArg(schemaTable, daysArgs[0], row);
     const startDate = evaluateFormulaDateArg(schemaTable, daysArgs[1], row);
     if (!endDate || !startDate) return '';
+    return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
+  }
+  const datedIfArgs = parseFormulaFunctionArgs(text, 'datedif');
+  if (datedIfArgs) {
+    if (datedIfArgs.length !== 3) return '';
+    const unit = String(evaluateFormulaValue(schemaTable, datedIfArgs[2], row) || '').replace(/^"|"$/g, '').trim().toUpperCase();
+    if (unit !== 'D') return '';
+    const startDate = evaluateFormulaDateArg(schemaTable, datedIfArgs[0], row);
+    const endDate = evaluateFormulaDateArg(schemaTable, datedIfArgs[1], row);
+    if (!startDate || !endDate) return '';
     return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
   }
   const dateValue = evaluateFormulaDateArg(schemaTable, text, row);

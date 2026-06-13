@@ -3380,7 +3380,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3580,6 +3580,16 @@ function evaluateMiddleFormulaTerm(row, term) {
     const endDate = evaluateMiddleFormulaDateArg(row, daysArgs[0]);
     const startDate = evaluateMiddleFormulaDateArg(row, daysArgs[1]);
     if (!endDate || !startDate) return '';
+    return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
+  }
+  const datedIfArgs = parseMiddleFormulaFunctionArgs(text, 'datedif');
+  if (datedIfArgs) {
+    if (datedIfArgs.length !== 3) return '';
+    const unit = String(evaluateMiddleFormulaValue(row, datedIfArgs[2]) || '').replace(/^"|"$/g, '').trim().toUpperCase();
+    if (unit !== 'D') return '';
+    const startDate = evaluateMiddleFormulaDateArg(row, datedIfArgs[0]);
+    const endDate = evaluateMiddleFormulaDateArg(row, datedIfArgs[1]);
+    if (!startDate || !endDate) return '';
     return Math.floor((endDate.getTime() - startDate.getTime()) / 86400000);
   }
   return toFormulaNumber(text);
@@ -4864,6 +4874,7 @@ function convertWecomFormulaExpression(expression) {
     .replace(/\bIFBLANK\s*\(/g, 'ifblank(')
     .replace(/\bIFERROR\s*\(/g, 'iferror(')
     .replace(/\bVALUE\s*\(/g, 'value(')
+    .replace(/\bDATEDIF\s*\(\s*([^,]+?)\s*,\s*([^,]+?)\s*,\s*"D"\s*\)/gi, 'days($2,$1)')
     .replace(/\bTEXT\s*\(\s*([^,]+?)\s*,\s*"yyyy年mm月"\s*\)/gi, 'monthlabel($1)')
     .replace(/\bROUND\s*\(/g, 'round(')
     .replace(/\bTODAY\s*\(\s*\)/g, 'today()')
@@ -5147,9 +5158,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/if/and/or/empty/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/datedif/today/if/and/or/empty/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|datedif|today|if|and|or|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);
