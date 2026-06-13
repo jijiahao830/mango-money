@@ -60,6 +60,7 @@ const MIDDLE_TABLE_JSON_BODY_LIMIT = 25 * 1024 * 1024;
 const SYSTEM_GENERATED_COLUMNS = new Map([
   ['cw_ddjszb', new Set(['ddbh'])]
 ]);
+const SHOULD_SYNC_FORMULA_VIEWS_ONLY = process.argv.includes('--sync-formula-views');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -247,9 +248,15 @@ const server = http.createServer(async (req, res) => {
 
 await ensureAppDirs();
 
-server.listen(PORT, HOST, () => {
-  console.log(`Mango Money is running at http://localhost:${PORT}`);
-});
+if (SHOULD_SYNC_FORMULA_VIEWS_ONLY) {
+  const result = await syncAllFormulaViews();
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(result.ok ? 0 : 1);
+} else {
+  server.listen(PORT, HOST, () => {
+    console.log(`Mango Money is running at http://localhost:${PORT}`);
+  });
+}
 
 async function renderReceipt(payload, type = 'deposit') {
   const skill = getSkillConfig(type);
@@ -591,9 +598,11 @@ async function listMiddlePlatformTables(viewer = {}) {
       if (!schemaTable) continue;
       const fieldProperties = normalizeTableFieldProperties(parseJsonObject(config.field_properties_json));
       const formulaConfigs = formulaConfigsByTable.get(schemaTable.tableName) || [];
-      const viewName = formulaConfigs.length
+      const syncedViewName = formulaConfigs.length
         ? await syncFormulaView(conn, schemaTable, formulaConfigs)
         : '';
+      const formulaView = await getFormulaViewInfo(conn, schemaTable.tableName);
+      const viewName = syncedViewName || formulaView.viewName;
 
       const allowedColumns = applyTableFieldPropertiesToColumns(
         attachFormulaConfigsToColumns(schemaTable, formulaConfigs),
@@ -610,13 +619,19 @@ async function listMiddlePlatformTables(viewer = {}) {
       const selectColumns = primaryKeyColumn && !columns.some(column => column.key === primaryKeyColumn.key)
         ? [primaryKeyColumn, ...columns]
         : columns;
+      const viewJoinSql = formulaView.viewName && primaryKeyColumn && formulaView.columns.has(primaryKeyColumn.key)
+        ? `LEFT JOIN ${escapeIdentifier(formulaView.viewName)} formula_view
+          ON formula_view.${escapeIdentifier(primaryKeyColumn.key)} = base.${escapeIdentifier(primaryKeyColumn.key)}`
+        : '';
+      const joinedFormulaViewColumns = viewJoinSql ? formulaView.columns : new Set();
       const selectSql = selectColumns
-        .map(column => formatSelectColumn(column))
+        .map(column => formatMiddleDisplaySelectColumn(column, joinedFormulaViewColumns, primaryKeyColumn))
         .join(', ');
-      const orderSql = buildMiddleTableOrderSql(schemaTable.tableName, allowedColumns);
+      const orderSql = buildMiddleTableOrderSql(schemaTable.tableName, allowedColumns, 'base');
       const [rows] = await conn.query(`
         SELECT ${selectSql}
-        FROM ${escapeIdentifier(viewName || schemaTable.tableName)}
+        FROM ${escapeIdentifier(schemaTable.tableName)} base
+        ${viewJoinSql}
         ${orderSql}
       `);
       const hydratedRows = await attachFormulaRawValues(conn, schemaTable, primaryKeyColumn, formulaConfigs, rows);
@@ -636,6 +651,36 @@ async function listMiddlePlatformTables(viewer = {}) {
     }
 
     return { ok: true, tables };
+  } finally {
+    await conn.end();
+  }
+}
+
+async function syncAllFormulaViews() {
+  const conn = await createMysqlConnection();
+  try {
+    await ensureFormulaFieldConfigTable(conn);
+    const schemaTables = await getSchemaTables(conn);
+    const formulaConfigsByTable = await getFormulaConfigsByTable(conn, schemaTables);
+    const createdViews = [];
+
+    for (const schemaTable of schemaTables) {
+      const formulaConfigs = formulaConfigsByTable.get(schemaTable.tableName) || [];
+      if (!formulaConfigs.length) continue;
+      const viewName = await syncFormulaView(conn, schemaTable, formulaConfigs);
+      createdViews.push({
+        tableName: schemaTable.tableName,
+        viewName,
+        formulaColumnCount: formulaConfigs.length,
+        formulaColumns: formulaConfigs.map(config => config.columnName)
+      });
+    }
+
+    return {
+      ok: true,
+      count: createdViews.length,
+      views: createdViews
+    };
   } finally {
     await conn.end();
   }
@@ -1847,6 +1892,29 @@ async function getTableColumnOptions(conn, tableName, columnName) {
     LIMIT 1000
   `);
   return uniqueStrings(rows.map(row => row.value));
+}
+
+async function getFormulaViewInfo(conn, tableName) {
+  const viewName = getFormulaViewName(tableName);
+  if (!isSafeDbIdentifier(viewName)) return { viewName: '', columns: new Set() };
+  const [rows] = await conn.execute(`
+    SELECT COLUMN_NAME AS columnName
+    FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+      AND EXISTS (
+        SELECT 1
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND TABLE_TYPE = 'VIEW'
+      )
+  `, [viewName, viewName]);
+  if (!rows.length) return { viewName: '', columns: new Set() };
+  return {
+    viewName,
+    columns: new Set(rows.map(row => row.columnName))
+  };
 }
 
 function isSafeDbIdentifier(value) {
@@ -3391,17 +3459,34 @@ function formatSelectColumn(column) {
   return name;
 }
 
-function buildMiddleTableOrderSql(tableName, columns) {
+function formatMiddleDisplaySelectColumn(column, viewColumns = new Set(), primaryKeyColumn = null) {
+  const name = escapeIdentifier(column.key);
+  const baseValue = `base.${name}`;
+  const canUseViewValue = viewColumns.has(column.key) && column.key !== primaryKeyColumn?.key;
+  const valueExpression = canUseViewValue
+    ? `IF(${baseValue} IS NULL OR CAST(${baseValue} AS CHAR) = '', formula_view.${name}, ${baseValue})`
+    : baseValue;
+  if (['date', 'datetime', 'timestamp'].includes(column.dataType)) {
+    const format = column.dataType === 'date' ? '%Y-%m-%d' : '%Y-%m-%d %H:%i:%s';
+    return `DATE_FORMAT(NULLIF(CAST(${valueExpression} AS CHAR), ''), '${format}') AS ${name}`;
+  }
+  return `${valueExpression} AS ${name}`;
+}
+
+function buildMiddleTableOrderSql(tableName, columns, sourceAlias = '') {
   const columnKeys = new Set(columns.map(column => column.key));
+  const column = key => sourceAlias
+    ? `${sourceAlias}.${escapeIdentifier(key)}`
+    : escapeIdentifier(key);
   if (tableName === 'cw_cxcsb' && columnKeys.has('clid2')) {
-    return 'ORDER BY clid2 + 0, clid2, cph';
+    return `ORDER BY ${column('clid2')} + 0, ${column('clid2')}, ${column('cph')}`;
   }
   if (tableName === 'cw_ndlrb' && columnKeys.has('rq')) {
-    return 'ORDER BY rq ASC, id ASC';
+    return `ORDER BY ${column('rq')} ASC, ${column('id')} ASC`;
   }
-  if (columnKeys.has('create_time') && columnKeys.has('id')) return 'ORDER BY create_time ASC, id ASC';
-  if (columnKeys.has('create_time')) return 'ORDER BY create_time ASC';
-  if (columnKeys.has('id')) return 'ORDER BY id ASC';
+  if (columnKeys.has('create_time') && columnKeys.has('id')) return `ORDER BY ${column('create_time')} ASC, ${column('id')} ASC`;
+  if (columnKeys.has('create_time')) return `ORDER BY ${column('create_time')} ASC`;
+  if (columnKeys.has('id')) return `ORDER BY ${column('id')} ASC`;
   return '';
 }
 
