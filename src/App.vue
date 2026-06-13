@@ -4996,7 +4996,7 @@ function resolveWecomFormulaColumn(table, rawName) {
 }
 
 function convertWecomFilterAggregateExpression(expression, currentTable, currentFieldMap) {
-  const match = String(expression || '').match(/^\[([^\]]+)\](.+)\.\[([^\]]+)\]\s*\.LISTCOMBINE\s*\(\s*\)\s*\.\s*(SUM|AVERAGE|AVG|MAX|MIN|COUNT)\s*\(\s*\)$/i);
+  const match = String(expression || '').match(/^\[([^\]]+)\](.+)\.\[([^\]]+)\](?:\s*\.LISTCOMBINE\s*\(\s*\))?\s*\.\s*(SUM|AVERAGE|AVG|MAX|MIN|COUNT)\s*\(\s*\)$/i);
   if (!match) return '';
   const sourceTable = resolveWecomFormulaTable(match[1]);
   if (!sourceTable) throw new Error(`企业微信公式表未匹配到数据库表：${String(match[1]).trim()}`);
@@ -5052,6 +5052,15 @@ function parseWecomFilterCondition(filter, sourceTable, sourceFieldMap, currentF
       operator: 'monthEq',
       currentColumnKey: currentFieldMap.get(normalizeWecomFormulaFieldName(monthMatch[2])),
       currentRawName: monthMatch[2]
+    };
+  }
+  const dayMatch = String(filter || '').match(/^\[Each\]\.\[([^\]]+)\]\s*\.DAY\s*\(\s*\)\s*=\s*\[([^\]]+)\]\s*\.DAY\s*\(\s*\)$/i);
+  if (dayMatch) {
+    return {
+      sourceColumnKey: sourceFieldMap.get(normalizeWecomFormulaFieldName(dayMatch[1])) || resolveWecomFormulaColumn(sourceTable, dayMatch[1]),
+      operator: 'dayEq',
+      currentColumnKey: currentFieldMap.get(normalizeWecomFormulaFieldName(dayMatch[2])),
+      currentRawName: dayMatch[2]
     };
   }
   const compareMatch = String(filter || '').match(/^\[Each\]\.\[([^\]]+)\]\s*(<=|>=|<>|!=|=|<|>)\s*\[([^\]]+)\]$/);

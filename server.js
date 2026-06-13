@@ -2317,7 +2317,7 @@ function buildFormulaSqlIfConditions(schemaTable, expectedTableName, args) {
 
 function parseFormulaConditionOperator(value) {
   const text = String(value || '').trim().replace(/^"|"$/g, '');
-  return ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty', 'lt', 'lte', 'gt', 'gte', 'monthEq'].includes(text) ? text : '';
+  return ['contains', 'notContains', 'eq', 'ne', 'empty', 'notEmpty', 'lt', 'lte', 'gt', 'gte', 'monthEq', 'dayEq'].includes(text) ? text : '';
 }
 
 function buildFormulaSqlFieldCondition(schemaTable, columnName, operator, compareArg) {
@@ -2352,6 +2352,9 @@ function buildFormulaSqlFieldCondition(schemaTable, columnName, operator, compar
   }
   if (operator === 'monthEq') {
     return `MONTH(${columnSql}) = MONTH(${compareSql})`;
+  }
+  if (operator === 'dayEq') {
+    return `DAYOFMONTH(${columnSql}) = DAYOFMONTH(${compareSql})`;
   }
   return `${columnSql} = ${compareSql}`;
 }
