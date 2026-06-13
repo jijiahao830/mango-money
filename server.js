@@ -2506,7 +2506,30 @@ function parseFormulaFunctionArgs(expression, functionName) {
   const text = String(expression || '').trim();
   const prefix = `${functionName}(`;
   if (!text.toLowerCase().startsWith(prefix) || !text.endsWith(')')) return null;
+  if (!isFormulaFunctionWrappingEntireText(text, functionName)) return null;
   return splitFormulaArguments(text.slice(prefix.length, -1));
+}
+
+function isFormulaFunctionWrappingEntireText(expression, functionName) {
+  const text = String(expression || '').trim();
+  const prefix = `${functionName}(`;
+  if (!text.toLowerCase().startsWith(prefix.toLowerCase()) || !text.endsWith(')')) return false;
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (char === '(') depth += 1;
+    if (char === ')') {
+      depth -= 1;
+      if (depth === 0 && index !== text.length - 1) return false;
+    }
+  }
+  return depth === 0;
 }
 
 function splitFormulaArguments(source) {

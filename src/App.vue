@@ -3644,6 +3644,7 @@ function parseMiddleFormulaFunctionArgs(expression, functionName) {
   const text = String(expression || '').trim();
   const prefix = `${functionName}(`;
   if (!text.toLowerCase().startsWith(prefix) || !text.endsWith(')')) return null;
+  if (!isFormulaFunctionWrappingEntireText(text, functionName)) return null;
   return splitMiddleFormulaArguments(text.slice(prefix.length, -1));
 }
 
