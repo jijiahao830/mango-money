@@ -1184,7 +1184,6 @@
 	      <section class="table-property-section">
 	        <div class="table-property-section-title">
 	          <strong>部门可见配置</strong>
-	          <span>不选择部门时，所有部门可见</span>
 	        </div>
 	        <div class="department-choice-list">
 	          <label v-for="department in tableDepartmentOptions" :key="department" class="department-choice">
@@ -1196,19 +1195,11 @@
 	            <span>{{ department }}</span>
 	          </label>
 	        </div>
-	        <label class="department-custom-input">
-	          <span>添加部门</span>
-	          <div>
-	            <input v-model="tablePropertyConfig.departmentDraft" placeholder="输入部门名称" @keyup.enter="addTableVisibleDepartment" />
-	            <button class="secondary tool-button" type="button" @click="addTableVisibleDepartment">添加</button>
-	          </div>
-	        </label>
 	      </section>
 
 	      <section class="table-property-section">
 	        <div class="table-property-section-title">
 	          <strong>字段属性配置</strong>
-	          <span>系统生成字段保存时不能人工提交</span>
 	        </div>
 	        <div class="field-property-list">
 	          <div v-for="column in tablePropertyColumns" :key="column.key" class="field-property-row">
@@ -1216,19 +1207,16 @@
 	              <strong>{{ column.label }}</strong>
 	              <small>{{ column.key }}</small>
 	            </div>
-	            <label>
-	              <input v-model="getTableFieldProperty(column).editable" type="checkbox" :disabled="getTableFieldProperty(column).systemGenerated" />
-	              <span>可编辑</span>
-	            </label>
-	            <label>
-	              <input v-model="getTableFieldProperty(column).required" type="checkbox" />
-	              <span>必填</span>
-	            </label>
-	            <label>
-	              <input v-model="getTableFieldProperty(column).systemGenerated" type="checkbox" @change="handleTableFieldSystemGeneratedChange(column)" />
-	              <span>系统生成</span>
-	            </label>
-	            <input v-model="getTableFieldProperty(column).readonlyReason" class="field-property-reason" placeholder="说明" />
+	            <div class="field-property-tag-options">
+	              <label>
+	                <input v-model="getTableFieldProperty(column).tagged" type="radio" :value="false" />
+	                <span>无标签</span>
+	              </label>
+	              <label>
+	                <input v-model="getTableFieldProperty(column).tagged" type="radio" :value="true" />
+	                <span>有标签</span>
+	              </label>
+	            </div>
 	          </div>
 	        </div>
 	      </section>
@@ -1766,6 +1754,7 @@ const permissionOptions = [
   { value: 'fleet_manager', label: '车队长' },
   { value: 'administrator', label: '管理员' }
 ];
+const defaultDepartmentOptions = ['财务部', '销售部', '业务部', '车队', '新媒体', '测试'];
 const fieldKindOptions = [
   { value: 'single', label: '单选' },
   { value: 'multi', label: '多选' },
@@ -1888,8 +1877,7 @@ const tablePropertyConfig = reactive({
   visibleDepartments: [],
   originalVisibleDepartments: [],
   fieldProperties: {},
-  originalFieldProperties: {},
-  departmentDraft: ''
+  originalFieldProperties: {}
 });
 const fieldOptionConfig = reactive({
   isOpen: false,
@@ -2066,12 +2054,7 @@ const tableConfigDirectoryCount = computed(() =>
 const tableDepartmentOptions = computed(() => uniqueClientStrings([
   ...users.value.map(user => user.department),
   ...tableConfigItems.value.flatMap(table => table.visibleDepartments || []),
-  '财务部',
-  '销售部',
-  '业务部',
-  '车队',
-  '新媒体',
-  '测试'
+  ...defaultDepartmentOptions
 ]));
 const tablePropertyColumns = computed(() => {
   const table = tableConfigItems.value.find(item => item.tableName === tablePropertyConfig.tableName);
@@ -4216,8 +4199,12 @@ async function loadTableManagement() {
       visibleFields: Array.isArray(table.visibleFields)
         ? table.visibleFields.filter(field => !isHiddenTableConfigColumn(field))
         : [],
-      visibleDepartments: Array.isArray(table.visibleDepartments) ? table.visibleDepartments : [],
-      fieldProperties: table.fieldProperties && typeof table.fieldProperties === 'object' ? table.fieldProperties : {}
+      visibleDepartments: normalizeTableVisibleDepartments(table.visibleDepartments),
+      fieldProperties: table.fieldProperties && typeof table.fieldProperties === 'object' ? table.fieldProperties : {},
+      columns: (table.columns || []).map(column => ({
+        ...column,
+        showFieldKindTag: table.fieldProperties?.[column.key]?.tagged ?? defaultShouldShowFieldKindTag(column)
+      }))
     }));
     tableConfigDirectory.value = 'visible';
     if (!filteredTableConfigItems.value.some(table => table.tableName === activeTableConfigName.value)) {
@@ -4275,22 +4262,27 @@ function cloneFieldProperties(properties = {}) {
 
 function createDefaultFieldProperty(column = {}) {
   return {
-    editable: column.isEditable !== false,
-    required: column.isRequired === true,
-    systemGenerated: column.isSystemGenerated === true,
-    readonlyReason: column.readonlyReason || ''
+    tagged: column.showFieldKindTag ?? defaultShouldShowFieldKindTag(column)
   };
+}
+
+function normalizeTableVisibleDepartments(departments) {
+  const normalized = uniqueClientStrings(departments || []);
+  return normalized.length ? normalized : [...tableDepartmentOptions.value];
 }
 
 function openTablePropertyConfig(table) {
   tablePropertyConfig.isOpen = true;
   tablePropertyConfig.tableName = table.tableName;
   tablePropertyConfig.tableLabel = table.tableLabel || table.tableName;
-  tablePropertyConfig.visibleDepartments = [...(table.visibleDepartments || [])];
+  tablePropertyConfig.visibleDepartments = normalizeTableVisibleDepartments(table.visibleDepartments);
   tablePropertyConfig.originalVisibleDepartments = [...tablePropertyConfig.visibleDepartments];
-  tablePropertyConfig.fieldProperties = cloneFieldProperties(table.fieldProperties || {});
+  tablePropertyConfig.fieldProperties = {};
+  for (const column of table.columns || []) {
+    if (isHiddenTableConfigColumn(column.key)) continue;
+    tablePropertyConfig.fieldProperties[column.key] = createDefaultFieldProperty(column);
+  }
   tablePropertyConfig.originalFieldProperties = cloneFieldProperties(tablePropertyConfig.fieldProperties);
-  tablePropertyConfig.departmentDraft = '';
 }
 
 function closeTablePropertyConfig() {
@@ -4311,24 +4303,9 @@ function toggleTableVisibleDepartment(department) {
   tablePropertyConfig.visibleDepartments = [...departments];
 }
 
-function addTableVisibleDepartment() {
-  const department = tablePropertyConfig.departmentDraft.trim();
-  if (!department) return;
-  const departments = new Set(tablePropertyConfig.visibleDepartments || []);
-  departments.add(department);
-  tablePropertyConfig.visibleDepartments = [...departments];
-  tablePropertyConfig.departmentDraft = '';
-}
-
-function handleTableFieldSystemGeneratedChange(column) {
-  const property = getTableFieldProperty(column);
-  if (property.systemGenerated) property.editable = false;
-}
-
 function resetTablePropertyConfig() {
   tablePropertyConfig.visibleDepartments = [...tablePropertyConfig.originalVisibleDepartments];
   tablePropertyConfig.fieldProperties = cloneFieldProperties(tablePropertyConfig.originalFieldProperties);
-  tablePropertyConfig.departmentDraft = '';
 }
 
 function applyTablePropertyConfig() {
@@ -4342,10 +4319,10 @@ function applyTablePropertyConfig() {
   for (const column of table.columns || []) {
     const property = table.fieldProperties[column.key];
     if (!property) continue;
-    column.isRequired = property.required === true;
-    column.isSystemGenerated = property.systemGenerated === true;
-    column.isEditable = column.isSystemGenerated ? false : property.editable !== false;
-    column.readonlyReason = property.readonlyReason || '';
+    column.showFieldKindTag = property.tagged === true;
+    if (property.tagged && !defaultShouldShowFieldKindTag(column)) {
+      column.fieldKind = 'relation';
+    }
   }
   tableConfigStatusText.value = '表属性配置已更新，点击保存配置后生效';
   tableConfigErrorText.value = '';
@@ -4381,6 +4358,11 @@ function isTableConfigFormulaCandidate(column) {
 }
 
 function shouldShowFieldKindTag(column) {
+  if (typeof column?.showFieldKindTag === 'boolean') return column.showFieldKindTag;
+  return defaultShouldShowFieldKindTag(column);
+}
+
+function defaultShouldShowFieldKindTag(column) {
   return !['text', 'date'].includes(getFieldKind(column));
 }
 

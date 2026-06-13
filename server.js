@@ -1730,10 +1730,7 @@ function normalizeTableFieldProperties(value) {
   for (const [columnName, rawProperty] of Object.entries(value)) {
     if (!rawProperty || typeof rawProperty !== 'object' || Array.isArray(rawProperty)) continue;
     result[columnName] = {
-      editable: rawProperty.editable !== false,
-      required: rawProperty.required === true,
-      systemGenerated: rawProperty.systemGenerated === true,
-      readonlyReason: String(rawProperty.readonlyReason || '').trim()
+      tagged: rawProperty.tagged === true
     };
   }
   return result;
@@ -1746,12 +1743,8 @@ function normalizeSubmittedTableFieldProperties(value, schemaTable) {
   for (const [columnName, property] of Object.entries(properties)) {
     if (!allowedColumns.has(columnName)) continue;
     const normalized = {
-      editable: property.editable !== false,
-      required: property.required === true,
-      systemGenerated: property.systemGenerated === true,
-      readonlyReason: property.readonlyReason || ''
+      tagged: property.tagged === true
     };
-    if (normalized.editable === true && normalized.required === false && normalized.systemGenerated === false && !normalized.readonlyReason) continue;
     result[columnName] = normalized;
   }
   return result;
@@ -1759,15 +1752,13 @@ function normalizeSubmittedTableFieldProperties(value, schemaTable) {
 
 function applyTableFieldPropertiesToColumns(columns, fieldProperties = {}) {
   return (columns || []).map((column) => {
-    const property = fieldProperties[column.key] || {};
-    const systemGenerated = column.isSystemGenerated || property.systemGenerated === true;
-    const editable = systemGenerated ? false : (property.editable === false ? false : column.isEditable);
+    const systemGenerated = column.isSystemGenerated;
+    const editable = systemGenerated ? false : column.isEditable;
     return {
       ...column,
       isEditable: editable,
-      isRequired: property.required === true,
       isSystemGenerated: systemGenerated,
-      readonlyReason: property.readonlyReason || column.readonlyReason || ''
+      readonlyReason: column.readonlyReason || ''
     };
   });
 }

@@ -1321,11 +1321,6 @@ hr {
   width: auto;
 }
 
-.department-custom-input > div {
-  display: flex;
-  gap: 8px;
-}
-
 .field-property-list {
   display: grid;
   gap: 8px;
@@ -1335,7 +1330,7 @@ hr {
 
 .field-property-row {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto auto auto minmax(160px, 1fr);
+  grid-template-columns: minmax(160px, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 9px 10px;
@@ -1360,6 +1355,13 @@ hr {
   font-weight: 700;
 }
 
+.field-property-tag-options {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-end;
+}
+
 .field-property-row label {
   display: inline-flex;
   align-items: center;
@@ -1367,12 +1369,9 @@ hr {
   white-space: nowrap;
 }
 
-.field-property-row input[type='checkbox'] {
+.field-property-row input[type='checkbox'],
+.field-property-row input[type='radio'] {
   width: auto;
-}
-
-.field-property-reason {
-  min-width: 0;
 }
 
 .middle-formula-value {
@@ -2333,10 +2332,6 @@ hr {
 
   .table-property-section-title {
     align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .department-custom-input > div {
     flex-direction: column;
   }
 
