@@ -1986,7 +1986,7 @@ function validateFormulaExpressionText(expression) {
 }
 
 function isAdvancedFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function extractFormulaDependencies(expression) {
@@ -2139,8 +2139,21 @@ function buildFormulaSqlValue(schemaTable, value) {
     if (ifArgs.length !== 3) throw new Error(`公式 if 参数数量无效：${value}`);
     return `IF(${buildFormulaSqlCondition(schemaTable, ifArgs[0])}, ${buildFormulaSqlValue(schemaTable, ifArgs[1])}, ${buildFormulaSqlValue(schemaTable, ifArgs[2])})`;
   }
+  const ifBlankArgs = parseFormulaFunctionArgs(text, 'ifblank');
+  if (ifBlankArgs) {
+    if (ifBlankArgs.length !== 2) throw new Error(`公式 ifblank 参数数量无效：${value}`);
+    const sourceSql = buildFormulaSqlValue(schemaTable, ifBlankArgs[0]);
+    return `IF(${sourceSql} IS NULL OR CAST(${sourceSql} AS CHAR) = '', ${buildFormulaSqlValue(schemaTable, ifBlankArgs[1])}, ${sourceSql})`;
+  }
+  const ifErrorArgs = parseFormulaFunctionArgs(text, 'iferror');
+  if (ifErrorArgs) {
+    if (ifErrorArgs.length !== 2) throw new Error(`公式 iferror 参数数量无效：${value}`);
+    return `COALESCE(${buildFormulaSqlValue(schemaTable, ifErrorArgs[0])}, ${buildFormulaSqlValue(schemaTable, ifErrorArgs[1])})`;
+  }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return sqlStringLiteral(stringMatch[1]);
+  const valueArgs = parseFormulaFunctionArgs(text, 'value');
+  if (valueArgs) return buildFormulaSqlValueCast(schemaTable, valueArgs);
   const sumIfArgs = parseFormulaFunctionArgs(text, 'sumif');
   if (sumIfArgs) return buildFormulaSqlSumIf(schemaTable, sumIfArgs);
   const countIfArgs = parseFormulaFunctionArgs(text, 'countif');
@@ -2362,6 +2375,11 @@ function buildFormulaSqlWorkdayAdd(schemaTable, args) {
 function buildFormulaSqlMonthLabel(schemaTable, args) {
   if (args.length !== 1) throw new Error('monthlabel 参数格式应为：monthlabel(日期)');
   return `DATE_FORMAT(${buildFormulaSqlDateArg(schemaTable, args[0])}, '%Y年%m月')`;
+}
+
+function buildFormulaSqlValueCast(schemaTable, args) {
+  if (args.length !== 1) throw new Error('value 参数格式应为：value(字段或数值)');
+  return `CAST(${buildFormulaSqlRawArg(schemaTable, args[0])} AS DECIMAL(18,2))`;
 }
 
 function buildFormulaSqlRound(schemaTable, args) {
@@ -2610,8 +2628,30 @@ function evaluateFormulaValue(schemaTable, expression, row) {
       ? evaluateFormulaValue(schemaTable, ifArgs[1], row)
       : evaluateFormulaValue(schemaTable, ifArgs[2], row);
   }
+  const ifBlankArgs = parseFormulaFunctionArgs(text, 'ifblank');
+  if (ifBlankArgs) {
+    if (ifBlankArgs.length !== 2) return '';
+    const sourceValue = evaluateFormulaValue(schemaTable, ifBlankArgs[0], row);
+    return sourceValue === '' ? evaluateFormulaValue(schemaTable, ifBlankArgs[1], row) : sourceValue;
+  }
+  const ifErrorArgs = parseFormulaFunctionArgs(text, 'iferror');
+  if (ifErrorArgs) {
+    if (ifErrorArgs.length !== 2) return '';
+    const sourceValue = evaluateFormulaValue(schemaTable, ifErrorArgs[0], row);
+    return sourceValue === '' ? evaluateFormulaValue(schemaTable, ifErrorArgs[1], row) : sourceValue;
+  }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
+  const valueArgs = parseFormulaFunctionArgs(text, 'value');
+  if (valueArgs) {
+    if (valueArgs.length !== 1) return '';
+    const rawValue = evaluateFormulaValue(schemaTable, valueArgs[0], row);
+    if (rawValue === '' || rawValue === null || rawValue === undefined) return '';
+    const normalized = String(rawValue).replace(/,/g, '').trim();
+    if (!normalized) return '';
+    const numericValue = Number(normalized);
+    return Number.isFinite(numericValue) ? numericValue : '';
+  }
   if (parseFormulaFunctionArgs(text, 'sumif')) return '';
   if (parseFormulaFunctionArgs(text, 'countif')) return '';
   if (parseFormulaFunctionArgs(text, 'countdistinctif')) return '';

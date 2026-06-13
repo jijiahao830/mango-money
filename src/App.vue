@@ -3380,7 +3380,7 @@ function calculateMiddleFormulaValue(row, column) {
 }
 
 function isAdvancedMiddleFormulaExpression(expression) {
-  return /\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
+  return /\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(String(expression || ''));
 }
 
 function calculateAdvancedMiddleFormulaValue(row, expression) {
@@ -3399,8 +3399,30 @@ function evaluateMiddleFormulaValue(row, expression) {
       ? evaluateMiddleFormulaValue(row, ifArgs[1])
       : evaluateMiddleFormulaValue(row, ifArgs[2]);
   }
+  const ifBlankArgs = parseMiddleFormulaFunctionArgs(text, 'ifblank');
+  if (ifBlankArgs) {
+    if (ifBlankArgs.length !== 2) return '';
+    const sourceValue = evaluateMiddleFormulaValue(row, ifBlankArgs[0]);
+    return sourceValue === '' ? evaluateMiddleFormulaValue(row, ifBlankArgs[1]) : sourceValue;
+  }
+  const ifErrorArgs = parseMiddleFormulaFunctionArgs(text, 'iferror');
+  if (ifErrorArgs) {
+    if (ifErrorArgs.length !== 2) return '';
+    const sourceValue = evaluateMiddleFormulaValue(row, ifErrorArgs[0]);
+    return sourceValue === '' ? evaluateMiddleFormulaValue(row, ifErrorArgs[1]) : sourceValue;
+  }
   const stringMatch = text.match(/^"([^"]*)"$/);
   if (stringMatch) return stringMatch[1];
+  const valueArgs = parseMiddleFormulaFunctionArgs(text, 'value');
+  if (valueArgs) {
+    if (valueArgs.length !== 1) return '';
+    const rawValue = evaluateMiddleFormulaValue(row, valueArgs[0]);
+    if (rawValue === '' || rawValue === null || rawValue === undefined) return '';
+    const normalized = String(rawValue).replace(/,/g, '').trim();
+    if (!normalized) return '';
+    const numericValue = Number(normalized);
+    return Number.isFinite(numericValue) ? numericValue : '';
+  }
   if (parseMiddleFormulaFunctionArgs(text, 'sumif')) return '';
   if (parseMiddleFormulaFunctionArgs(text, 'countif')) return '';
   if (parseMiddleFormulaFunctionArgs(text, 'countdistinctif')) return '';
@@ -4823,6 +4845,9 @@ function convertWecomFormulaExpression(expression) {
 
   text = text
     .replace(/(\{this\.[^{}]+\})\s*\.\s*ISBLANK\s*\(\s*\)/gi, 'empty($1)')
+    .replace(/\bIFBLANK\s*\(/g, 'ifblank(')
+    .replace(/\bIFERROR\s*\(/g, 'iferror(')
+    .replace(/\bVALUE\s*\(/g, 'value(')
     .replace(/\bTEXT\s*\(\s*([^,]+?)\s*,\s*"yyyy年mm月"\s*\)/gi, 'monthlabel($1)')
     .replace(/\bROUND\s*\(/g, 'round(')
     .replace(/\bTODAY\s*\(\s*\)/g, 'today()')
@@ -5106,9 +5131,9 @@ function validateAdvancedFormulaExpression(expression) {
     .replace(/\{[^{}]+\}/g, '')
     .replace(/"[^"]*"/g, '');
   if (/[^0-9+\-*/().,\s<>=a-zA-Z_]/.test(allowedText)) {
-    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
+    return '公式只能包含字段、数字、加减乘除、括号、days/today/empty/if/ifblank/iferror/value/sumif/countif/countdistinctif/avgif/maxif/minif/listif/lookup/lookupdistinct/dateadd/workdayadd/monthlabel/eq/max/round/concat/rentaldays 和简单条件';
   }
-  if (!/\b(days|today|if|empty|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
+  if (!/\b(days|today|if|empty|ifblank|iferror|value|sumif|countif|countdistinctif|avgif|maxif|minif|listif|lookup|lookupdistinct|dateadd|workdayadd|monthlabel|eq|max|round|concat|rentaldays)\s*\(/i.test(text)) {
     return '公式函数格式无效';
   }
   const tokens = extractFormulaExpressionTokens(expression);
