@@ -469,14 +469,20 @@
           </label>
         </div>
 
-        <label>
-          <span>保留截止时间</span>
-          <input
-            v-model="holdUntilAt"
-            type="datetime-local"
-            name="holdUntil"
-          />
-        </label>
+        <div class="field-block">
+          <span class="field-label">保留截止时间</span>
+          <div class="date-time-row">
+            <input v-model="holdUntilDate" type="date" name="holdUntilDate" />
+            <select v-model="holdUntilHour" name="holdUntilHour" aria-label="保留截止小时">
+              <option value="">时</option>
+              <option v-for="hour in hourOptions" :key="hour" :value="hour">{{ hour }}</option>
+            </select>
+            <select v-model="holdUntilMinute" name="holdUntilMinute" aria-label="保留截止分钟">
+              <option value="">分</option>
+              <option v-for="minute in minuteOptions" :key="minute" :value="minute">{{ minute }}</option>
+            </select>
+          </div>
+        </div>
 
         <div class="form-actions">
           <button type="button" :disabled="isLoading" @click="generateReceipt">生成</button>
@@ -1952,7 +1958,9 @@ const formulaConfig = reactive({
 });
 const pickupAt = ref('');
 const dropoffAt = ref('');
-const holdUntilAt = ref('');
+const holdUntilDate = ref('');
+const holdUntilHour = ref('12');
+const holdUntilMinute = ref('30');
 const balancePickupAt = ref('');
 const balanceReceivedAt = ref('');
 const receiptForm = ref(null);
@@ -1984,6 +1992,9 @@ const previewImageStyle = computed(() => ({
 const progressLogoStyle = computed(() => ({
   left: `${progress.value}%`
 }));
+
+const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
+const minuteOptions = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
 
 const isAdministrator = computed(() => currentUser.value?.permission === 'administrator');
 const currentDisplayName = computed(() => currentUser.value?.displayName || currentUser.value?.username || '');
@@ -2202,9 +2213,9 @@ watch(rentalTime, (value) => {
   form.rentalTime = value;
 });
 
-watch(holdUntilAt, (value) => {
-  form.holdUntil = value ? formatDateTime(value) : '';
-});
+watch([holdUntilDate, holdUntilHour, holdUntilMinute], () => {
+  form.holdUntil = formatDateTimeParts(holdUntilDate.value, holdUntilHour.value, holdUntilMinute.value);
+}, { immediate: true });
 
 const balanceRentalTime = computed(() => {
   if (!balancePickupAt.value) return '';
@@ -5483,7 +5494,9 @@ function clearForm() {
   form.orderId = '';
   pickupAt.value = '';
   dropoffAt.value = '';
-  holdUntilAt.value = '';
+  holdUntilDate.value = '';
+  holdUntilHour.value = '12';
+  holdUntilMinute.value = '30';
   revokePreviewObjectUrl();
   result.imageUrl = '';
   result.webpName = '';
@@ -5560,6 +5573,13 @@ function formatDate(value) {
 function formatDateTime(value) {
   const [date = '', time = ''] = value.split('T');
   return `${formatDate(date)} ${time}`;
+}
+
+function formatDateTimeParts(date, hour, minute) {
+  if (!date) return '';
+  const safeHour = String(hour || '00').padStart(2, '0');
+  const safeMinute = String(minute || '00').padStart(2, '0');
+  return `${formatDate(date)} ${safeHour}:${safeMinute}`;
 }
 
 function formatDisplayDate(value) {
