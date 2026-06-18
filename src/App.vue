@@ -657,6 +657,10 @@
                 <span>应退金额</span>
                 <input v-model="statementForm.refundableDeposit" inputmode="decimal" />
               </label>
+              <label>
+                <span>剩余违章押金</span>
+                <input v-model="statementForm.violationDeposit" inputmode="decimal" />
+              </label>
             </div>
           </div>
 
@@ -747,40 +751,17 @@
             <h2>车辆检查结果</h2>
             <div class="row">
               <label>
-                <span>有无新增磕碰</span>
-                <select v-model="statementForm.checkScratch">
+                <span>有无车损</span>
+                <select v-model="statementForm.checkDamage">
                   <option value="无">无</option>
                   <option value="有">有</option>
                 </select>
               </label>
               <label>
-                <span>有无新增划痕</span>
-                <select v-model="statementForm.checkMark">
-                  <option value="无">无</option>
-                  <option value="有">有</option>
-                </select>
-              </label>
-              <label>
-                <span>有无事故记录</span>
-                <select v-model="statementForm.checkAccident">
-                  <option value="无">无</option>
-                  <option value="有">有</option>
-                </select>
-              </label>
-            </div>
-            <div class="row">
-              <label>
-                <span>有无超公里费用</span>
-                <select v-model="statementForm.checkOverMileage">
-                  <option value="无">无</option>
-                  <option value="有">有</option>
-                </select>
-              </label>
-              <label>
-                <span>有无超时费用</span>
-                <select v-model="statementForm.checkOvertime">
-                  <option value="无">无</option>
-                  <option value="有">有</option>
+                <span>有无额外费用</span>
+                <select v-model="statementForm.checkViolation">
+                  <option value="无额外费用">无额外费用</option>
+                  <option value="有额外费用">有额外费用</option>
                 </select>
               </label>
             </div>
@@ -802,10 +783,6 @@
               <label>
                 <span>车辆押金</span>
                 <input v-model="statementForm.vehicleDeposit" inputmode="decimal" />
-              </label>
-              <label>
-                <span>违章押金</span>
-                <input v-model="statementForm.violationDeposit" inputmode="decimal" />
               </label>
             </div>
           </div>
@@ -1732,11 +1709,8 @@ const statementForm = reactive({
   startFuel: '',
   returnFuel: '',
   refuelAmount: '',
-  checkScratch: '无',
-  checkMark: '无',
-  checkAccident: '无',
-  checkOverMileage: '无',
-  checkOvertime: '无',
+  checkDamage: '无',
+  checkViolation: '无额外费用',
   abnormalNote1: '',
   abnormalNote2: '',
   abnormalNote3: '',
@@ -5549,7 +5523,11 @@ function clearBalanceForm() {
 
 function clearStatementForm() {
   for (const key of Object.keys(statementForm)) {
-    statementForm[key] = key.startsWith('check') ? '无' : '';
+    if (key === 'checkViolation') {
+      statementForm[key] = '无额外费用';
+    } else {
+      statementForm[key] = key.startsWith('check') ? '无' : '';
+    }
   }
   revokePreviewObjectUrl();
   result.imageUrl = '';
