@@ -3900,17 +3900,21 @@ async function patchSkillFonts(skill) {
   const cssExists = await fsp.stat(cssPath).catch(() => null);
   if (!cssExists) return;
 
-  const fontBuffer = await fsp.readFile(fontPath);
-  const fontBase64 = fontBuffer.toString('base64');
+  // Copy font file into the skill's fonts directory so Chrome can load it via file path
+  const fontDestDir = path.join(skill.root, 'assets', 'fonts');
+  const fontDestPath = path.join(fontDestDir, 'JDSongTi.ttf');
+  await fsp.mkdir(fontDestDir, { recursive: true });
+  await fsp.copyFile(fontPath, fontDestPath);
+
+  // Use a relative path from the CSS file location: ../fonts/JDSongTi.ttf
   const fontFace = `@font-face {
   font-family: "JDSongTi";
-  src: url("data:font/truetype;base64,${fontBase64}") format("truetype");
+  src: url("../fonts/JDSongTi.ttf") format("truetype");
   font-weight: 100 900;
   font-style: normal;
 }\n\n`;
 
   let css = await fsp.readFile(cssPath, 'utf8');
-  // Prepend @font-face and inject JDSongTi as first font in all font-family declarations
   css = fontFace + css;
   css = css.replace(
     /font-family:\s*"Songti SC"/g,
