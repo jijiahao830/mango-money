@@ -312,16 +312,16 @@ async function saveDjdRecord(payload) {
         hold_until
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        payload.createUser,
-        payload.customerName,
-        payload.customerId,
-        payload.carModel,
-        payload.orderId,
-        payload.rentalTime,
-        payload.pickupDropoffMethod,
-        payload.depositAmount,
-        payload.balanceAmount,
-        normalizeMysqlDateTime(payload.holdUntil)
+        stringValue(payload.createUser),
+        stringValue(payload.customerName),
+        stringValue(payload.customerId),
+        stringValue(payload.carModel),
+        stringValue(payload.orderId),
+        stringValue(payload.rentalTime),
+        stringValue(payload.pickupDropoffMethod),
+        decimalValue(payload.depositAmount),
+        decimalValue(payload.balanceAmount),
+        mysqlDateTimeValue(payload.holdUntil)
       ]
     );
     return { ok: true, id: result.insertId };
@@ -361,20 +361,20 @@ async function saveWkdRecord(payload) {
         operator
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        payload.createUser,
-        payload.customerName,
-        payload.customerId,
-        payload.carModel,
-        payload.orderId,
-        payload.rentalTime,
-        payload.pickupDropoffMethod,
-        payload.balanceAmount,
-        payload.unitPrice,
-        payload.paymentMethod,
-        payload.orderRemarkLine1 || '',
-        payload.orderRemarkLine2 || '',
-        normalizeMysqlDateTime(payload.receivedAt),
-        payload.operator
+        stringValue(payload.createUser),
+        stringValue(payload.customerName),
+        stringValue(payload.customerId),
+        stringValue(payload.carModel),
+        stringValue(payload.orderId),
+        stringValue(payload.rentalTime),
+        stringValue(payload.pickupDropoffMethod),
+        stringValue(payload.balanceAmount),
+        stringValue(payload.unitPrice),
+        stringValue(payload.paymentMethod),
+        stringValue(payload.orderRemarkLine1),
+        stringValue(payload.orderRemarkLine2),
+        stringValue(payload.receivedAt),
+        stringValue(payload.operator || payload.createUser)
       ]
     );
     return { ok: true, id: result.insertId };
@@ -3782,6 +3782,33 @@ function validateZdPayload(payload) {
 function normalizeMysqlDateTime(value) {
   const normalized = String(value || '').trim().replace(/\./g, '-');
   return normalized || null;
+}
+
+function stringValue(value) {
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
+function decimalValue(value) {
+  const normalized = String(value ?? '').trim().replace(/,/g, '');
+  if (!normalized) return '0';
+  const number = Number(normalized);
+  return Number.isFinite(number) ? normalized : '0';
+}
+
+function mysqlDateTimeValue(value) {
+  const normalized = String(value || '').trim().replace(/\./g, '-');
+  return normalized || formatMysqlDateTime(new Date());
+}
+
+function formatMysqlDateTime(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
 async function sendGeneratedWebp(res, result) {

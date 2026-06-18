@@ -570,6 +570,11 @@
             </label>
           </div>
 
+          <label>
+            <span>公里限制（只填数字，例如 200）</span>
+            <input v-model="balanceForm.mileageLimit" inputmode="numeric" />
+          </label>
+
           <div class="row">
             <label>
               <span>订单备注1（可以不填，不填的时候为空）</span>
@@ -1674,6 +1679,7 @@ const balanceForm = reactive({
   pickupDropoffMethod: '',
   balanceAmount: '',
   unitPrice: '',
+  mileageLimit: '',
   paymentMethod: '',
   orderRemarkLine1: '',
   orderRemarkLine2: '',
@@ -3858,6 +3864,7 @@ function getBalancePayload() {
     pickupDropoffMethod: balanceForm.pickupDropoffMethod.trim(),
     balanceAmount: normalizeMoneyInput(balanceForm.balanceAmount),
     unitPrice: balanceForm.unitPrice.trim(),
+    mileageLimit: balanceForm.mileageLimit.trim(),
     paymentMethod: balanceForm.paymentMethod.trim(),
     orderRemarkLine1: balanceForm.orderRemarkLine1.trim(),
     orderRemarkLine2: balanceForm.orderRemarkLine2.trim(),
@@ -3966,27 +3973,9 @@ async function generateStatementReceipt() {
 
 function validateFormValues() {
   const errors = [];
-  const chinesePattern = /[\u3400-\u9fff]/;
-  const digitsOnlyPattern = /^\d+$/;
 
   if (String(form.orderId ?? '').trim() === '') {
     errors.push('订单编号不能为空');
-  }
-
-  if (chinesePattern.test(form.customerId)) {
-    errors.push('客户编号不能包含中文');
-  }
-
-  if (chinesePattern.test(form.orderId)) {
-    errors.push('订单编号不能包含中文');
-  }
-
-  if (String(form.depositAmount).trim() && !digitsOnlyPattern.test(String(form.depositAmount).trim())) {
-    errors.push('定金金额只能是数字');
-  }
-
-  if (String(form.balanceAmount).trim() && !digitsOnlyPattern.test(String(form.balanceAmount).trim())) {
-    errors.push('尾款金额只能是数字');
   }
 
   return errors.join('\n');
@@ -3994,23 +3983,9 @@ function validateFormValues() {
 
 function validateBalanceFormValues() {
   const errors = [];
-  const chinesePattern = /[\u3400-\u9fff]/;
-  const moneyPattern = /^\d+(\.\d+)?$/;
 
   if (String(balanceForm.orderId ?? '').trim() === '') {
     errors.push('订单编号不能为空');
-  }
-
-  if (chinesePattern.test(balanceForm.customerId)) {
-    errors.push('客户编号不能包含中文');
-  }
-
-  if (chinesePattern.test(balanceForm.orderId)) {
-    errors.push('订单编号不能包含中文');
-  }
-
-  if (String(balanceForm.balanceAmount).trim() && !moneyPattern.test(String(balanceForm.balanceAmount).trim())) {
-    errors.push('合计收款金额只能是数字，可有小数点');
   }
 
   return errors.join('\n');
@@ -4018,14 +3993,9 @@ function validateBalanceFormValues() {
 
 function validateStatementFormValues() {
   const errors = [];
-  const chinesePattern = /[\u3400-\u9fff]/;
 
   if (String(statementForm.orderId ?? '').trim() === '') {
     errors.push('订单编号不能为空');
-  }
-
-  if (chinesePattern.test(statementForm.orderId)) {
-    errors.push('订单编号不能包含中文');
   }
 
   return errors.join('\n');
@@ -5538,6 +5508,7 @@ function clearBalanceForm() {
   balanceForm.pickupDropoffMethod = '';
   balanceForm.balanceAmount = '';
   balanceForm.unitPrice = '';
+  balanceForm.mileageLimit = '';
   balanceForm.paymentMethod = '';
   balanceForm.orderRemarkLine1 = '';
   balanceForm.orderRemarkLine2 = '';
