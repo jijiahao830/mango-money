@@ -3907,17 +3907,23 @@ async function patchSkillFonts(skill) {
   src: url("data:font/truetype;base64,${fontBase64}") format("truetype");
   font-weight: 100 900;
   font-style: normal;
+}
+@font-face {
+  font-family: "经典宋体简";
+  src: url("data:font/truetype;base64,${fontBase64}") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
 }\n\n`;
 
   let css = await fsp.readFile(cssPath, 'utf8');
   css = fontFace + css;
   css = css.replace(
     /font-family:\s*"Songti SC"/g,
-    'font-family: "JDSongTi", "Songti SC"'
+    'font-family: "JDSongTi", "经典宋体简", "Songti SC"'
   );
   css = css.replace(
     /font-family:\s*"Bodoni 72"/g,
-    'font-family: "JDSongTi", "Bodoni 72"'
+    'font-family: "JDSongTi", "经典宋体简", "Bodoni 72"'
   );
   await fsp.writeFile(cssPath, css, 'utf8');
 }
