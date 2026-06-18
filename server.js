@@ -3875,7 +3875,9 @@ async function ensureSkillExtracted(type) {
   if (!skillStat) throw new Error(`Skill file not found: ${path.relative(ROOT_DIR, skill.file)}`);
 
   const marker = path.join(skill.root, '.source-mtime');
-  const markerValue = `${skillStat.mtimeMs}:${skill.patchRuntime ? 'chrome-runtime-patch-v14-font-embed' : 'runtime-v2-font-embed'}`;
+  const fontStat = await fsp.stat(path.join(ROOT_DIR, '经典宋体简.ttf')).catch(() => null);
+  const fontTag = fontStat ? `font-${Math.round(fontStat.mtimeMs)}` : 'no-font';
+  const markerValue = `${skillStat.mtimeMs}:${skill.patchRuntime ? 'chrome-runtime-patch-v14-font-embed' : 'runtime-v2-font-embed'}:${fontTag}`;
   const currentMarker = await fsp.readFile(marker, 'utf8').catch(() => '');
 
   if (currentMarker === markerValue && fs.existsSync(skill.script)) return;
@@ -3884,7 +3886,41 @@ async function ensureSkillExtracted(type) {
   await fsp.mkdir(RUNTIME_DIR, { recursive: true });
   execFileSync('unzip', ['-oq', skill.file, '-d', RUNTIME_DIR], { stdio: 'pipe' });
   if (skill.patchRuntime) await patchSkillChromeLookup(skill);
+  await patchSkillFonts(skill);
   await fsp.writeFile(marker, markerValue, 'utf8');
+}
+
+async function patchSkillFonts(skill) {
+  const fontPath = path.join(ROOT_DIR, '经典宋体简.ttf');
+  const fontExists = await fsp.stat(fontPath).catch(() => null);
+  if (!fontExists) return;
+
+  const type = skill.scriptName.replace('render_', '').replace('.mjs', '');
+  const cssPath = path.join(skill.root, 'assets', 'styles', `${type}.css`);
+  const cssExists = await fsp.stat(cssPath).catch(() => null);
+  if (!cssExists) return;
+
+  const fontBuffer = await fsp.readFile(fontPath);
+  const fontBase64 = fontBuffer.toString('base64');
+  const fontFace = `@font-face {
+  font-family: "JDSongTi";
+  src: url("data:font/truetype;base64,${fontBase64}") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+}\n\n`;
+
+  let css = await fsp.readFile(cssPath, 'utf8');
+  // Prepend @font-face and inject JDSongTi as first font in all font-family declarations
+  css = fontFace + css;
+  css = css.replace(
+    /font-family:\s*"Songti SC"/g,
+    'font-family: "JDSongTi", "Songti SC"'
+  );
+  css = css.replace(
+    /font-family:\s*"Bodoni 72"/g,
+    'font-family: "JDSongTi", "Bodoni 72"'
+  );
+  await fsp.writeFile(cssPath, css, 'utf8');
 }
 
 async function patchSkillChromeLookup(skill) {
