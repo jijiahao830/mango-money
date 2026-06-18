@@ -554,6 +554,7 @@
               >
                 <option value="" disabled>请选择用车方式</option>
                 <option value="配驾服务">配驾服务</option>
+                <option value="自驾">自驾</option>
                 <option value="接送机">接送机</option>
               </select>
             </label>
